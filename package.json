@@ -1,0 +1,25 @@
+{
+  "name": "lynx-xm30-gunnery",
+  "version": "1.0.0",
+  "description": "3D Lynx XM30 IFV gunnery/spotting game — third and first person from the gunner or commander/spotter seat.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "serve": "npx --yes serve -l 8080 .",
+    "check": "node tools/check.mjs"
+  },
+  "keywords": [
+    "three.js",
+    "webgl",
+    "xm30",
+    "lynx",
+    "ifv",
+    "game"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "playwright": "^1.49.1"
+  }
+}

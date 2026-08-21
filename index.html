@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>LYNX XM30 — Gunner / Spotter</title>
+<link rel="stylesheet" href="styles/hud.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#127950;</text></svg>" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js",
+    "three/": "./vendor/three/"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="viewport"></canvas>
+
+<!-- ============================ SIGHT OVERLAY ============================ -->
+<div id="sight" class="sight" data-seat="gunner" aria-hidden="true">
+  <!-- Optic tube mask: only shown in first-person sight views -->
+  <div class="optic-mask"></div>
+
+  <svg class="reticle" viewBox="-500 -500 1000 1000" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <!-- Gunner: NATO-style ballistic reticle with mil stadia -->
+      <g id="ret-gunner">
+        <line x1="-460" y1="0" x2="-70" y2="0" />
+        <line x1="70"  y1="0" x2="460" y2="0" />
+        <line x1="0" y1="-460" x2="0" y2="-70" />
+        <line x1="0" y1="70"  x2="0" y2="460" />
+        <!-- aiming cross -->
+        <line x1="-26" y1="0" x2="26" y2="0" stroke-width="3" />
+        <line x1="0" y1="-26" x2="0" y2="26" stroke-width="3" />
+        <circle cx="0" cy="0" r="2.5" class="dot" />
+      </g>
+      <!-- Spotter: open panoramic graticule -->
+      <g id="ret-spotter">
+        <circle cx="0" cy="0" r="300" class="thin" />
+        <line x1="-360" y1="0" x2="-120" y2="0" />
+        <line x1="120"  y1="0" x2="360" y2="0" />
+        <line x1="0" y1="-360" x2="0" y2="-120" />
+        <line x1="0" y1="120"  x2="0" y2="360" />
+        <path d="M -34 -34 L -34 -14 M -34 -34 L -14 -34" />
+        <path d="M  34 -34 L  34 -14 M  34 -34 L  14 -34" />
+        <path d="M -34  34 L -34  14 M -34  34 L -14  34" />
+        <path d="M  34  34 L  34  14 M  34  34 L  14  34" />
+      </g>
+    </defs>
+
+    <g class="reticle-body">
+      <use id="reticle-use" href="#ret-gunner" />
+      <!-- horizontal mil scale -->
+      <g id="mil-h" class="mil-scale"></g>
+      <!-- vertical stadia used for mil-relation ranging -->
+      <g id="mil-v" class="mil-scale"></g>
+      <!-- ballistic drop chevrons (gunner only) -->
+      <g id="drop-marks" class="drop"></g>
+    </g>
+  </svg>
+
+  <!-- Range gate: the box the player brackets a target with while ranging -->
+  <div id="range-gate" class="range-gate" hidden><span></span></div>
+</div>
+
+<!-- 3D-tracked labels for contacts get injected here -->
+<div id="markers" class="markers" aria-hidden="true"></div>
+
+<!-- ================================ HUD ================================= -->
+<div id="hud" class="hud">
+
+  <header class="hud-top">
+    <div class="panel seat-panel">
+      <div class="seat-name" id="seat-name">GUNNER</div>
+      <div class="seat-sub" id="view-name">PRIMARY SIGHT · 3.0&times;</div>
+    </div>
+
+    <div class="azimuth" id="azimuth">
+      <div class="az-tape" id="az-tape"></div>
+      <div class="az-needle"></div>
+      <div class="az-hull" id="az-hull" title="Hull reference"></div>
+    </div>
+
+    <div class="panel mission-panel">
+      <div class="row"><span>SCORE</span><b id="score">0</b></div>
+      <div class="row"><span>ROUTE</span><b id="distance">0 m</b></div>
+    </div>
+  </header>
+
+  <!-- Turret azimuth indicator (classic round "clock" repeater) -->
+  <div class="turret-repeater" id="turret-repeater" title="Turret azimuth relative to hull">
+    <svg viewBox="-50 -50 100 100">
+      <circle class="tr-body" cx="0" cy="0" r="42" />
+      <path class="tr-hull" d="M -13 30 L -13 -22 L 0 -34 L 13 -22 L 13 30 Z" />
+      <g id="tr-turret" class="tr-turret">
+        <path d="M -8 8 L -8 -8 L 8 -8 L 8 8 Z" />
+        <line x1="0" y1="-8" x2="0" y2="-40" />
+      </g>
+      <g id="tr-cmd" class="tr-cmd"><line x1="0" y1="0" x2="0" y2="-44" /></g>
+    </svg>
+  </div>
+
+  <!-- Perception / contact management -->
+  <section class="panel contacts" id="contacts-panel">
+    <div class="panel-title">
+      <span>PERCEPTION</span>
+      <em id="contact-count">0 CONTACTS</em>
+    </div>
+    <ul id="contact-list" class="contact-list"></ul>
+    <div class="perception-legend">
+      <span><i class="sw detect"></i>DETECT</span>
+      <span><i class="sw recognize"></i>RECOG</span>
+      <span><i class="sw identify"></i>ID</span>
+    </div>
+  </section>
+
+  <!-- Ranging readout -->
+  <section class="panel ranging" id="ranging-panel">
+    <div class="panel-title"><span>LRF / MIL-RELATION</span></div>
+    <div class="rng-main"><b id="rng-value">- - - -</b><span>m</span></div>
+    <div class="rng-sub">
+      <div class="row"><span>SUBTENSE</span><b id="rng-mils">--.- mil</b></div>
+      <div class="row"><span>SOURCE</span><b id="rng-source">NO RETURN</b></div>
+      <div class="row"><span>SIGHT</span><b id="rng-fov">--.-&deg; FOV</b></div>
+    </div>
+  </section>
+
+  <!-- Vehicle status -->
+  <section class="panel status" id="status-panel">
+    <div class="stat-block">
+      <div class="speedo"><b id="speed">0</b><span>km/h</span></div>
+      <div class="gear" id="gear">D</div>
+    </div>
+    <div class="bar-row"><label>HULL</label><div class="bar"><i id="bar-hull" style="width:100%"></i></div></div>
+    <div class="bar-row"><label>MOB</label><div class="bar mob"><i id="bar-mob" style="width:100%"></i></div></div>
+    <div class="ammo">
+      <div class="ammo-row" id="ammo-ap"><span>50mm AP</span><b>—</b></div>
+      <div class="ammo-row" id="ammo-he"><span>50mm ABM</span><b>—</b></div>
+      <div class="ammo-row" id="ammo-coax"><span>7.62 COAX</span><b>—</b></div>
+    </div>
+  </section>
+
+  <div class="ticker" id="ticker"></div>
+
+  <div class="hint-bar" id="hint-bar"></div>
+</div>
+
+<!-- ============================== OVERLAYS ============================== -->
+<div id="boot" class="overlay boot">
+  <div class="boot-card">
+    <div class="boot-badge">
+      <svg viewBox="0 0 120 60" class="boot-glyph" aria-hidden="true">
+        <path d="M6 44 h108 M14 44 v-9 h92 v9 M22 35 l6 -12 h58 l8 12" />
+        <rect x="52" y="10" width="30" height="13" rx="2" />
+        <line x1="82" y1="16" x2="116" y2="16" />
+      </svg>
+    </div>
+    <h1>LYNX <span>XM30</span></h1>
+    <p class="tagline">Mechanized Infantry Combat Vehicle &mdash; crew station trainer</p>
+
+    <div class="boot-grid">
+      <div>
+        <h2>Choose your seat</h2>
+        <div class="seat-choice">
+          <button class="seat-btn selected" data-seat="gunner">
+            <b>GUNNER</b>
+            <small>Primary sight, 50 mm main gun and coax. Narrow FOV, high magnification.</small>
+          </button>
+          <button class="seat-btn" data-seat="spotter">
+            <b>SPOTTER / CC</b>
+            <small>Independent panoramic sight. Find, range and hand off targets to the gunner.</small>
+          </button>
+        </div>
+        <h2>Difficulty</h2>
+        <div class="seat-choice small">
+          <button class="diff-btn" data-diff="training"><b>TRAINING</b><small>Slow, forgiving</small></button>
+          <button class="diff-btn selected" data-diff="standard"><b>STANDARD</b><small>Normal tempo</small></button>
+          <button class="diff-btn" data-diff="gunnery"><b>GUNNERY</b><small>Fast, lethal</small></button>
+        </div>
+      </div>
+      <div>
+        <h2>Controls</h2>
+        <table class="keys">
+          <tr><td><kbd>Mouse</kbd></td><td>Traverse / elevate the sight you are looking through</td></tr>
+          <tr><td><kbd>LMB</kbd></td><td>Fire main gun <em>(gunner)</em> · Designate contact <em>(spotter)</em></td></tr>
+          <tr><td><kbd>RMB</kbd></td><td>Lase for range (LRF)</td></tr>
+          <tr><td><kbd>Space</kbd></td><td>Coax machine gun</td></tr>
+          <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>Magnification: wide / medium / narrow</td></tr>
+          <tr><td><kbd>X</kbd></td><td>Cycle sight channel: day &rarr; white-hot &rarr; black-hot</td></tr>
+          <tr><td><kbd>Tab</kbd></td><td>Swap seat (gunner &harr; spotter)</td></tr>
+          <tr><td><kbd>V</kbd></td><td>Toggle first person sight &harr; third person</td></tr>
+          <tr><td><kbd>C</kbd></td><td>Cycle 3rd-person camera orbit</td></tr>
+          <tr><td><kbd>A</kbd> <kbd>D</kbd></td><td>Direct the driver &mdash; steer around obstacles</td></tr>
+          <tr><td><kbd>W</kbd> <kbd>S</kbd></td><td>Increase / reduce road speed</td></tr>
+          <tr><td><kbd>T</kbd></td><td>Slew turret to designated contact (hunter&ndash;killer)</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Toggle ammunition: AP &harr; airburst</td></tr>
+          <tr><td><kbd>H</kbd></td><td>Show / hide this help &nbsp;·&nbsp; <kbd>P</kbd> pause</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <button id="start-btn" class="start-btn">START RUN</button>
+    <p class="fineprint" id="boot-fineprint">
+      Vehicle geometry is a good-faith approximation from published Lynx&nbsp;KF41 / XM30 figures &mdash; a game model, not engineering data.
+    </p>
+  </div>
+</div>
+
+<div id="pause" class="overlay pause" hidden>
+  <div class="pause-card">
+    <h2>PAUSED</h2>
+    <p>Press <kbd>P</kbd> to resume &nbsp;·&nbsp; <kbd>H</kbd> for controls</p>
+  </div>
+</div>
+
+<div id="after-action" class="overlay aar" hidden>
+  <div class="aar-card">
+    <h2>AFTER ACTION REVIEW</h2>
+    <table class="aar-table" id="aar-table"></table>
+    <button id="restart-btn" class="start-btn">RUN AGAIN</button>
+  </div>
+</div>
+
+<noscript><div class="overlay"><div class="boot-card"><h1>JavaScript required</h1></div></div></noscript>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

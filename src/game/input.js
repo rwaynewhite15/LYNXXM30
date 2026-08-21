@@ -3,6 +3,12 @@
  *
  * Mouse deltas accumulate between frames and are drained by the game loop, so
  * a 240 Hz mouse on a 60 Hz display still traverses the right amount.
+ *
+ * Pointer lock is not always available — a sandboxed iframe without the
+ * pointer-lock permission will refuse it, and so will some browser
+ * configurations. When it is refused the class falls back to deriving deltas
+ * from raw cursor movement over the canvas, which is less pleasant but keeps
+ * the game playable instead of leaving the sight frozen.
  */
 
 export class Input {
@@ -15,7 +21,11 @@ export class Input {
     this.clicked = new Set();
     this.locked = false;
     this.enabled = false;
+    /** True once pointer lock has been refused and we are tracking manually. */
+    this.fallback = false;
     this.onLockChange = null;
+    this.onFallback = null;
+    this._lastClient = null;
 
     this._onKeyDown = (e) => {
       if (!this.enabled) return;
@@ -30,13 +40,27 @@ export class Input {
     this._onBlur = () => { this.keys.clear(); this.buttons.clear(); };
 
     this._onMove = (e) => {
-      if (!this.locked) return;
-      this.look.dx += e.movementX || 0;
-      this.look.dy += e.movementY || 0;
+      if (this.locked) {
+        this.look.dx += e.movementX || 0;
+        this.look.dy += e.movementY || 0;
+        this._lastClient = null;
+        return;
+      }
+      if (!this.fallback || !this.enabled) return;
+      // No lock: difference the cursor position ourselves. movementX/Y is
+      // unreliable without lock across browsers, so don't trust it here.
+      if (this._lastClient) {
+        this.look.dx += e.clientX - this._lastClient.x;
+        this.look.dy += e.clientY - this._lastClient.y;
+      }
+      this._lastClient = { x: e.clientX, y: e.clientY };
     };
     this._onDown = (e) => {
       if (!this.enabled) return;
-      if (!this.locked) { this.requestLock(); return; }
+      // Keyboard events need the canvas focused, which matters inside an
+      // iframe where the page does not get focus for free.
+      this.canvas.focus?.({ preventScroll: true });
+      if (!this.locked && !this.fallback) { this.requestLock(); return; }
       if (!this.buttons.has(e.button)) this.clicked.add(e.button);
       this.buttons.add(e.button);
       e.preventDefault();
@@ -59,11 +83,37 @@ export class Input {
   }
 
   requestLock() {
-    if (!this.enabled) return;
-    const p = this.canvas.requestPointerLock?.({ unadjustedMovement: true });
-    if (p && typeof p.catch === 'function') {
-      p.catch(() => this.canvas.requestPointerLock?.());
+    if (!this.enabled || this.fallback) return;
+    if (!this.canvas.requestPointerLock) { this._useFallback(); return; }
+    let p;
+    try {
+      p = this.canvas.requestPointerLock({ unadjustedMovement: true });
+    } catch {
+      this._useFallback();
+      return;
     }
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => {
+        // Retry without the option, then give up and track manually.
+        try {
+          const q = this.canvas.requestPointerLock();
+          if (q && typeof q.catch === 'function') q.catch(() => this._useFallback());
+        } catch { this._useFallback(); }
+      });
+    }
+    // Some environments neither resolve nor reject: if the lock has not
+    // arrived shortly, assume it is not coming.
+    clearTimeout(this._lockTimer);
+    this._lockTimer = setTimeout(() => {
+      if (!this.locked && this.enabled) this._useFallback();
+    }, 700);
+  }
+
+  _useFallback() {
+    if (this.fallback) return;
+    this.fallback = true;
+    this._lastClient = null;
+    if (this.onFallback) this.onFallback();
   }
 
   releaseLock() {
@@ -93,6 +143,7 @@ export class Input {
   }
 
   dispose() {
+    clearTimeout(this._lockTimer);
     removeEventListener('keydown', this._onKeyDown);
     removeEventListener('keyup', this._onKeyUp);
     removeEventListener('blur', this._onBlur);

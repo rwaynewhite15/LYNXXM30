@@ -92,7 +92,10 @@ class Game {
     this.input = new Input(canvas);
     this.input.onLockChange = (locked) => {
       document.body.classList.toggle('playing', locked);
-      if (!locked && this.state === 'running') this.pause(true);
+      if (!locked && this.state === 'running' && !this.input.fallback) this.pause(true);
+    };
+    this.input.onFallback = () => {
+      this.hud.say('POINTER LOCK UNAVAILABLE — move the mouse over the view to traverse', 'warn');
     };
 
     this.score = {

@@ -74,8 +74,10 @@ export class Gunnery {
       if (dist < lrf.minRange || dist > lrf.maxRange) continue;
       _p.normalize();
       const off = Math.acos(Math.max(-1, Math.min(1, _p.dot(_d))));
-      // The beam spreads with range; at 1 km a 0.3 mrad beam is 0.3 m across.
-      if (off < beam + Math.atan2(0.5, dist) * 0.5 && dist < best) {
+      // The beam returns off the figure if it lands anywhere on the
+      // silhouette: its angular half-height, plus the beam's own divergence.
+      const silhouette = Math.atan2(CONFIG.enemies.height * 0.5, dist);
+      if (off < beam + silhouette && dist < best) {
         best = dist;
         what = 'TARGET';
       }

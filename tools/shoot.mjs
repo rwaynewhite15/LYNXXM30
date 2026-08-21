@@ -6,7 +6,7 @@
  */
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { mkdirSync, existsSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 
@@ -65,7 +65,35 @@ page.on('requestfailed', (r) => {
 
 if (mode === 'bundle') {
   // Smoke-test the single-file build: it must boot and run with no import map
-  // and no separate requests.
+  // and no separate requests. If an artifact fragment was also built, wrap it
+  // in a minimal skeleton the way a host would and check that too.
+  const fragment = join(ROOT, 'dist/lynx-xm30.artifact.html');
+  if (existsSync(fragment)) {
+    const body = await readFile(fragment, 'utf8');
+    await writeFile(join(ROOT, 'dist/_artifact-wrapped.html'),
+      `<!doctype html><html><head><meta charset="utf-8">` +
+      `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+      `</head><body>${body}</body></html>`);
+    const errs = [];
+    const p2 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    p2.on('pageerror', (e) => errs.push(e.message));
+    await p2.goto(base + '/dist/_artifact-wrapped.html', { waitUntil: 'load' });
+    const ok = await p2.waitForFunction('window.__ready === true', { timeout: 20000 })
+      .then(() => true).catch(() => false);
+    if (ok) {
+      await p2.click('#start-btn');
+      await p2.waitForTimeout(400);
+      const info = await p2.evaluate(() => { window.__game.simulate(8); return window.__game.debugInfo(); });
+      console.log('artifact fragment:', JSON.stringify({ state: info.state, enemies: info.enemies, calls: info.calls }));
+      await p2.screenshot({ path: join(OUT, 'artifact.png'), animations: 'disabled', timeout: 90000 });
+      console.log('shot artifact.png');
+    } else {
+      console.log('artifact fragment FAILED to boot:', errs.slice(0, 3).join(' | '));
+      process.exitCode = 1;
+    }
+    await p2.close();
+  }
+
   const requests = [];
   page.on('request', (r) => requests.push(r.url()));
   await page.goto(base + '/dist/lynx-xm30.html', { waitUntil: 'load' });

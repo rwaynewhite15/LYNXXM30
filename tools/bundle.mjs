@@ -1,11 +1,15 @@
 /**
  * Single-file build.
  *
- *   node tools/bundle.mjs
+ *   node tools/bundle.mjs             -> dist/lynx-xm30.html
+ *   node tools/bundle.mjs --artifact  -> dist/lynx-xm30.artifact.html
  *
- * Produces dist/lynx-xm30.html: the whole game — three.js, every module, the
- * stylesheet — inlined into one HTML file that runs from disk or from any
- * static host with no import map and no separate requests.
+ * The first is a complete HTML document: the whole game — three.js, every
+ * module, the stylesheet — inlined into one file that runs from disk or from
+ * any static host with no import map and no separate requests.
+ *
+ * The second is the same payload without the <!doctype>/<html>/<head>/<body>
+ * scaffolding, for hosts that supply their own document skeleton.
  */
 import { build } from 'esbuild';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
@@ -55,7 +59,20 @@ if (html.includes('src="./src/main.js"') || html.includes('importmap')) {
   throw new Error('bundle: an inline replacement did not take');
 }
 
-const outFile = join(OUT, 'lynx-xm30.html');
-await writeFile(outFile, html);
-const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
-console.log(`wrote ${outFile}  (${kb} KB)`);
+const report = async (name, text) => {
+  const file = join(OUT, name);
+  await writeFile(file, text);
+  console.log(`wrote ${file}  (${(Buffer.byteLength(text) / 1024).toFixed(0)} KB)`);
+};
+
+await report('lynx-xm30.html', html);
+
+if (process.argv.includes('--artifact')) {
+  // Strip the document scaffolding, keeping the title first so a host that
+  // scans only the head of the file still finds it.
+  const title = html.match(/<title>[\s\S]*?<\/title>/i)?.[0] ?? '<title>LYNX XM30</title>';
+  const body = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1];
+  if (!body) throw new Error('bundle: could not find the document body');
+  const style = html.match(/<style>[\s\S]*?<\/style>/i)?.[0] ?? '';
+  await report('lynx-xm30.artifact.html', `${title}\n${style}\n${body.trim()}\n`);
+}

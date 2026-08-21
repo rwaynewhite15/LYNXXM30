@@ -143,6 +143,26 @@
     </div>
   </section>
 
+  <!-- GPU / performance readout, toggled with G -->
+  <section class="panel diagnostics" id="diagnostics" hidden>
+    <div class="panel-title"><span>RENDERER</span><em id="diag-api">—</em></div>
+    <div class="diag-gpu" id="diag-gpu">—</div>
+    <div class="diag-warn" id="diag-warn" hidden></div>
+    <div class="diag-grid">
+      <div class="row"><span>FRAME</span><b id="diag-frame">—</b></div>
+      <div class="row"><span>WORST</span><b id="diag-worst">—</b></div>
+      <div class="row"><span>QUALITY</span><b id="diag-preset">—</b></div>
+      <div class="row"><span>BUFFER</span><b id="diag-buffer">—</b></div>
+      <div class="row"><span>SCALE</span><b id="diag-scale">—</b></div>
+      <div class="row"><span>DRAW CALLS</span><b id="diag-calls">—</b></div>
+      <div class="row"><span>TRIANGLES</span><b id="diag-tris">—</b></div>
+      <div class="row"><span>TEXTURES</span><b id="diag-tex">—</b></div>
+      <div class="row"><span>SHADERS</span><b id="diag-prog">—</b></div>
+    </div>
+    <div class="diag-graph"><canvas id="diag-graph" width="240" height="34"></canvas></div>
+    <div class="diag-foot"><kbd>Q</kbd> quality &nbsp;·&nbsp; <kbd>G</kbd> hide</div>
+  </section>
+
   <div class="ticker" id="ticker"></div>
 
   <div class="hint-bar" id="hint-bar"></div>
@@ -197,6 +217,8 @@
           <tr><td><kbd>W</kbd> <kbd>S</kbd></td><td>Increase / reduce road speed</td></tr>
           <tr><td><kbd>T</kbd></td><td>Slew turret to designated contact (hunter&ndash;killer)</td></tr>
           <tr><td><kbd>R</kbd></td><td>Toggle ammunition: AP &harr; airburst</td></tr>
+          <tr><td><kbd>Q</kbd></td><td>Graphics quality: low / balanced / high</td></tr>
+          <tr><td><kbd>G</kbd></td><td>GPU and performance readout</td></tr>
           <tr><td><kbd>H</kbd></td><td>Show / hide this help &nbsp;·&nbsp; <kbd>P</kbd> pause</td></tr>
         </table>
       </div>

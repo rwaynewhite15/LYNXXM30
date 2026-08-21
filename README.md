@@ -112,11 +112,48 @@ metres.
 | `T` | Slew the turret onto the designated contact |
 | `A` `D` | Direct the driver — steer around what is in the road |
 | `W` `S` | Order more or less road speed |
+| `Q` | Graphics quality: low / balanced / high |
+| `G` | GPU and performance readout |
 | `H` / `P` | Controls / pause |
 
 Hitting an obstacle costs mobility and hull; a slower vehicle hits softer.
 Score rewards engaging a shooter **before it fires at you**, identifying it
 first, and taking it at range.
+
+---
+
+## Graphics and the GPU
+
+Rendering is WebGL2 throughout, so the work lands on your GPU — the renderer
+asks for the high-performance adapter explicitly, and nothing in the game
+forces a software path. Press **`G`** for a readout that names the adapter
+actually doing the work, alongside frame time, render scale, draw calls and
+triangle count. If your browser has fallen back to software rasterisation
+(SwiftShader, llvmpipe), the panel says so in amber rather than leaving you to
+guess why it feels slow.
+
+**`Q`** cycles three presets, which move the four settings that actually cost
+something together:
+
+| | Render scale | Shadows | Shadow map / range | Filtering | Route built ahead |
+| --- | --- | --- | --- | --- | --- |
+| **LOW** | 1.0× | off | — | none | 460 m |
+| **BALANCED** | 1.5× | soft | 2048 / 90 m | 8× | 780 m |
+| **HIGH** | 2.0× | soft | 4096 / 150 m | 16× | 1150 m |
+
+Render scale is absolute, not a fraction of your display's device pixel ratio.
+On a 1× monitor **HIGH** supersamples to 2× and downsamples back, which is
+where a strong GPU buys you a visibly cleaner picture; on a Retina panel
+**LOW** halves the buffer and saves a lot of fill rate. Your choice is
+remembered in browser storage.
+
+On top of the preset, an adaptive scaler trims render resolution when frames
+run long and gives it back when they don't, so a laptop iGPU stays playable
+without holding a discrete card to the same picture.
+
+If the readout says software rendering, it's a browser setting rather than
+anything in the game: check `chrome://gpu` (or `about:support` in Firefox) and
+turn hardware acceleration back on.
 
 ---
 
@@ -180,6 +217,7 @@ src/
     hud.js            reticle generation, symbology, panels
     input.js          pointer lock and latched keys
     audio.js          synthesised — no sample files
+    graphics.js       quality presets, adaptive resolution, GPU readout
 tools/
   verify.mjs          end-to-end checks in a real browser
   shoot.mjs           headless screenshots of the model and the game

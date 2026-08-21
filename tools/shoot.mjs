@@ -185,6 +185,16 @@ if (mode === 'bundle') {
   console.log('game:', JSON.stringify(info));
   await shot('game-play.png');
 
+  // With the GPU readout open, so the panel is covered by a render too.
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.showDiagnostics = true;
+    for (let i = 0; i < 8; i++) { g.step(0.05); g.hud.update(0.3, g); }
+  }).catch(() => {});
+  await page.waitForTimeout(400);
+  await shot('game-diagnostics.png');
+  await page.evaluate(() => { window.__game.showDiagnostics = false; }).catch(() => {});
+
   // Close-up on a target through the narrow field of view, to check that a
   // figure in a window actually reads at gunnery range.
   await page.evaluate(() => {

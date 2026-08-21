@@ -72,6 +72,18 @@ export class Hud {
     this.ticker = el('ticker');
     this.hintBar = el('hint-bar');
 
+    this.diagPanel = el('diagnostics');
+    this.diag = {
+      api: el('diag-api'), gpu: el('diag-gpu'), warn: el('diag-warn'),
+      frame: el('diag-frame'), worst: el('diag-worst'), preset: el('diag-preset'),
+      buffer: el('diag-buffer'), scale: el('diag-scale'), calls: el('diag-calls'),
+      tris: el('diag-tris'), tex: el('diag-tex'), prog: el('diag-prog'),
+      graph: el('diag-graph'),
+    };
+    this._diagAccum = 0;
+    this._frameHistory = [];
+    this._diagIdentified = false;
+
     this._markerPool = [];
     this._markersInUse = [];
     this._contactRows = [];
@@ -345,6 +357,95 @@ export class Hud {
     this._hitFlashTimer = 0.14;
   }
 
+  /* ------------------------------ diagnostics ------------------------------ */
+
+  /**
+   * GPU and frame-time readout. Refreshed a few times a second rather than
+   * every frame — a panel that re-renders 120 times a second is itself a
+   * measurable share of the frame it claims to be measuring.
+   */
+  updateDiagnostics(dt, game) {
+    const show = !!game.showDiagnostics;
+    this.diagPanel.hidden = !show;
+
+    const g = game.graphics;
+    if (!g) return;
+
+    // The frame-time history is sampled every frame even while hidden, so the
+    // graph is already populated the moment the panel is opened.
+    this._frameHistory.push(g.frameMs);
+    if (this._frameHistory.length > 160) this._frameHistory.shift();
+    if (!show) return;
+
+    this._diagAccum += dt;
+    if (this._diagAccum < 0.25) { this._drawFrameGraph(); return; }
+    this._diagAccum = 0;
+
+    const r = g.report();
+    const d = this.diag;
+
+    if (!this._diagIdentified) {
+      this._diagIdentified = true;
+      d.api.textContent = r.gpu.api.replace('WebGL ', 'WebGL');
+      d.gpu.textContent = r.gpu.short || r.gpu.device;
+      if (r.gpu.software) {
+        d.warn.hidden = false;
+        d.warn.textContent =
+          'SOFTWARE RENDERING — the browser is not using a GPU. ' +
+          'Enable hardware acceleration in your browser settings.';
+      } else if (r.gpu.device === 'unavailable') {
+        d.warn.hidden = false;
+        d.warn.textContent = 'Adapter name masked by the browser. Rendering is still on the GPU.';
+      }
+    }
+
+    d.frame.textContent = `${r.frameMs.toFixed(1)} ms · ${Math.round(r.fps)} fps`;
+    const worst = g.takeWorst();
+    d.worst.textContent = worst > 0 ? `${worst.toFixed(1)} ms` : '—';
+    d.preset.textContent = `${r.preset.label}${r.adaptive ? ' · ADAPTIVE' : ''}`;
+    d.buffer.textContent = r.buffer;
+    d.scale.textContent = `${r.renderScale.toFixed(2)}× render · ${r.displayRatio}× display`;
+    d.calls.textContent = String(r.calls);
+    d.tris.textContent = r.triangles.toLocaleString();
+    d.tex.textContent = String(r.textures);
+    d.prog.textContent = String(r.programs);
+
+    this._drawFrameGraph();
+  }
+
+  /** Frame times over the last few seconds, with a 60 fps reference line. */
+  _drawFrameGraph() {
+    const cv = this.diag.graph;
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const w = cv.width, h = cv.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const CEILING = 40;   // ms; anything worse is pinned to the top
+    const y = (ms) => h - Math.min(1, ms / CEILING) * h;
+
+    // 60 fps reference.
+    ctx.strokeStyle = 'rgba(125,253,166,.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y(16.7) + 0.5);
+    ctx.lineTo(w, y(16.7) + 0.5);
+    ctx.stroke();
+
+    const hist = this._frameHistory;
+    if (hist.length < 2) return;
+    const step = w / (hist.length - 1);
+    ctx.strokeStyle = '#7dfda6';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let i = 0; i < hist.length; i++) {
+      const px = i * step;
+      const py = y(hist[i]);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+
   /* --------------------------------- update -------------------------------- */
 
   /**
@@ -448,6 +549,9 @@ export class Hud {
       row.classList.toggle('selected', key === gunnery.ammoKey);
       row.classList.toggle('empty', count <= 0);
     }
+
+    /* ----------------------------- diagnostics ------------------------------ */
+    this.updateDiagnostics(dt, game);
 
     /* -------------------------------- hints --------------------------------- */
     this.hintBar.textContent = game.hint || '';

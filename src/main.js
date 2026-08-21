@@ -21,6 +21,7 @@ import { Perception, LEVEL } from './game/perception.js';
 import { Gunnery } from './game/gunnery.js';
 import { Audio } from './game/audio.js';
 import { Hud } from './game/hud.js';
+import { Graphics } from './game/graphics.js';
 
 const canvas = document.getElementById('viewport');
 const bootOverlay = document.getElementById('boot');
@@ -35,7 +36,7 @@ const _v2 = new THREE.Vector3();
 /* ========================================================================== */
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, CONFIG.render.maxPixelRatio));
+// Render scale is owned by the Graphics manager (see game/graphics.js).
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -74,6 +75,11 @@ const fill = new THREE.DirectionalLight(0x9fbcdd, 0.34);
 fill.position.set(-1, 0.6, -0.6);
 scene.add(fill);
 
+// Owns render resolution, shadow cost, texture filtering and the GPU readout.
+// Constructed here so the quality preset is applied before anything is drawn.
+const graphics = new Graphics(renderer, sun);
+graphics.useMaterials(materials());
+
 /* ========================================================================== */
 /*  Game                                                                      */
 /* ========================================================================== */
@@ -88,6 +94,10 @@ class Game {
     this.difficultyKey = 'standard';
 
     this.hud = new Hud();
+    this.graphics = graphics;
+    this.showDiagnostics = false;
+    graphics.onResize = () => this.resize();
+    graphics.onChange = (preset) => this.hud.say(`GRAPHICS → ${preset.label}`);
     this.audio = new Audio();
     this.input = new Input(canvas);
     this.input.onLockChange = (locked) => {
@@ -300,6 +310,20 @@ class Game {
     const { input, views, gunnery, driving, hud, perception } = this;
 
     if (input.hit('KeyP')) { this.state === 'paused' ? this.resume() : this.pause(); }
+
+    // Graphics controls stay live while paused — that is when you want to
+    // change them.
+    if (input.hit('KeyQ')) this.graphics.cycle();
+    if (input.hit('KeyG')) {
+      this.showDiagnostics = !this.showDiagnostics;
+      if (this.showDiagnostics) {
+        const gpu = this.graphics.gpu;
+        hud.say(gpu.software
+          ? 'RENDERER — software fallback, no GPU in use'
+          : `RENDERER — ${gpu.short || gpu.device}`);
+      }
+    }
+
     if (this.state !== 'running') return;
 
     if (input.hit('Tab')) {
@@ -518,7 +542,12 @@ class Game {
       levels: this._contactLevels(),
       triangles: renderer.info.render.triangles,
       calls: renderer.info.render.calls,
-      fps: Math.round(1 / Math.max(0.001, this._smoothDt ?? 0.016)),
+      fps: Math.round(this.graphics.fps),
+      frameMs: Number(this.graphics.frameMs.toFixed(2)),
+      quality: this.graphics.presetName,
+      renderScale: Number(this.graphics.report().renderScale.toFixed(2)),
+      gpu: this.graphics.gpu.short,
+      softwareRenderer: this.graphics.gpu.software,
     };
   }
 }
@@ -598,6 +627,7 @@ function tick(now) {
   lastFrame = now;
   smooth += (raw - smooth) * 0.08;
   game._smoothDt = smooth;
+  graphics.sample(raw);
   if (game.state === 'boot') {
     // Nothing to simulate yet; keep the canvas cleared behind the overlay.
     renderer.render(scene, camera);

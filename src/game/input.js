@@ -156,6 +156,7 @@ export class Input {
 /** Keys the game consumes, so the page doesn't scroll under the player. */
 const HANDLED = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyV', 'KeyX', 'KeyT', 'KeyR',
+  'KeyQ', 'KeyG',
   'KeyH', 'KeyP', 'Tab', 'Space', 'Digit1', 'Digit2', 'Digit3',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
 ]);

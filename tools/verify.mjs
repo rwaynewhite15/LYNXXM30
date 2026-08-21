@@ -355,6 +355,81 @@ check('the third-person camera sits back from the vehicle',
 check('the first-person camera sits inside the vehicle',
   sightDist < 3, `${sightDist.toFixed(1)} m from hull centre`);
 
+/* ---------------------------------------------------------------- graphics */
+console.log('\nGRAPHICS');
+const graphics = await page.evaluate(() => {
+  const g = window.__game;
+  const gfx = g.graphics;
+  const start = gfx.report();
+
+  // Walk every preset and record what each one costs.
+  const presets = [];
+  for (const name of ['low', 'balanced', 'high']) {
+    gfx.apply(name, { silent: true });
+    const r = gfx.report();
+    presets.push({
+      name,
+      renderScale: r.renderScale,
+      shadows: r.preset.shadows,
+      shadowMap: r.preset.shadowMap,
+      streamAhead: r.preset.streamAhead,
+    });
+  }
+  gfx.apply('balanced', { silent: true });
+
+  // Adaptive scaler: a run of slow frames must reduce the render scale.
+  gfx.adaptive = true;
+  const before = gfx.resScale;
+  for (let i = 0; i < 200; i++) gfx.sample(0.050);   // 20 fps
+  const afterSlow = gfx.resScale;
+  for (let i = 0; i < 400; i++) gfx.sample(0.008);   // 125 fps
+  const afterFast = gfx.resScale;
+
+  // Open the readout and let the HUD populate it.
+  g.showDiagnostics = true;
+  for (let i = 0; i < 5; i++) g.hud.update(0.3, g);
+
+  return {
+    gpu: start.gpu,
+    presets,
+    adaptive: { before, afterSlow, afterFast },
+    panelHidden: document.getElementById('diagnostics').hidden,
+    panelGpu: document.getElementById('diag-gpu').textContent.trim(),
+    panelApi: document.getElementById('diag-api').textContent.trim(),
+    panelCalls: document.getElementById('diag-calls').textContent.trim(),
+    warnShown: !document.getElementById('diag-warn').hidden,
+  };
+});
+
+check('the renderer reports a WebGL2 context',
+  /WebGL\s*2/i.test(graphics.gpu.api), graphics.gpu.api);
+check('the GPU adapter is identified',
+  graphics.gpu.device !== 'unavailable' && graphics.gpu.short.length > 0,
+  graphics.gpu.short);
+check('software rendering is detected and flagged',
+  graphics.gpu.software === true && graphics.warnShown,
+  graphics.gpu.software ? 'flagged (this container has no GPU)' : 'hardware adapter — warning correctly absent');
+check('quality presets scale render resolution independently of the display',
+  graphics.presets[0].renderScale < graphics.presets[2].renderScale,
+  graphics.presets.map((p) => `${p.name} ${p.renderScale}x`).join(', '));
+check('quality presets scale the shadow map',
+  graphics.presets[0].shadowMap < graphics.presets[2].shadowMap,
+  graphics.presets.map((p) => p.shadowMap).join(' → '));
+check('the low preset drops shadows',
+  graphics.presets[0].shadows === false && graphics.presets[1].shadows === true);
+check('quality presets scale the streaming distance',
+  graphics.presets[0].streamAhead < graphics.presets[2].streamAhead,
+  graphics.presets.map((p) => `${p.streamAhead} m`).join(' → '));
+check('adaptive resolution backs off on slow frames',
+  graphics.adaptive.afterSlow < graphics.adaptive.before,
+  `${graphics.adaptive.before.toFixed(2)} → ${graphics.adaptive.afterSlow.toFixed(2)}`);
+check('adaptive resolution recovers when frames are fast',
+  graphics.adaptive.afterFast > graphics.adaptive.afterSlow,
+  `${graphics.adaptive.afterSlow.toFixed(2)} → ${graphics.adaptive.afterFast.toFixed(2)}`);
+check('the readout populates when opened',
+  !graphics.panelHidden && graphics.panelGpu.length > 3 && /\d/.test(graphics.panelCalls),
+  `${graphics.panelApi} · ${graphics.panelCalls} calls`);
+
 /* --------------------------------------------------------------------- HUD */
 console.log('\nHUD');
 const hud = await page.evaluate(() => {

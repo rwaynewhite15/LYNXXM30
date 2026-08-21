@@ -19,9 +19,14 @@ const MIME = {
   '.css': 'text/css', '.json': 'application/json', '.png': 'image/png',
 };
 
+// Optionally serve under a prefix, so the harness can reproduce the way
+// GitHub Pages hosts a project site at /<repo>/ rather than the domain root.
+const PREFIX = process.env.SERVE_PREFIX || '';
+
 const server = createServer(async (req, res) => {
   try {
     let p = decodeURIComponent(req.url.split('?')[0]);
+    if (PREFIX && p.startsWith(PREFIX)) p = p.slice(PREFIX.length) || '/';
     if (p === '/') p = '/index.html';
     const file = join(ROOT, normalize(p).replace(/^(\.\.[/\\])+/, ''));
     const body = await readFile(file);
@@ -33,7 +38,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(0, r));
 const port = server.address().port;
-const base = `http://127.0.0.1:${port}`;
+const base = `http://127.0.0.1:${port}${PREFIX}`;
 
 const mode = process.argv[2] || 'inspect';
 const args = process.argv.slice(3);
@@ -63,7 +68,52 @@ page.on('requestfailed', (r) => {
   if (!r.url().includes('favicon')) errors.push('REQFAIL: ' + r.url());
 });
 
-if (mode === 'bundle') {
+if (mode === 'mobile') {
+  // A phone held in landscape, with touch and no mouse.
+  const [w, h] = (args[0] || '844x390').split('x').map(Number);
+  const phone = await browser.newContext({
+    viewport: { width: w, height: h },
+    deviceScaleFactor: 3,
+    hasTouch: true,
+    isMobile: true,
+  });
+  const mp = await phone.newPage();
+  mp.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
+  await mp.goto(base + '/index.html?seed=20260821', { waitUntil: 'load', timeout: 90000 });
+  await mp.waitForFunction('window.__ready === true', { timeout: 40000 });
+  await mp.screenshot({ path: join(OUT, 'mobile-boot.png'), animations: 'disabled', timeout: 90000 });
+  console.log('shot mobile-boot.png');
+
+  await mp.click('#start-btn');
+  await mp.waitForTimeout(400);
+  await mp.evaluate(() => {
+    const g = window.__game;
+    g.simulate(40);
+    // Lay on a target so the perception symbology is exercised too.
+    const t = g.enemies.enemies.find((e) => {
+      const c = g.perception.contacts.get(e.id);
+      return e.alive && c && c.hasLos && e.basePosition.z > g.driving.position.z + 70;
+    });
+    if (t) {
+      g.views.setMagnification(1);
+      for (let i = 0; i < 50; i++) { g.views.aimAt(t.centre, true); g.step(0.05); }
+      g.gunnery.lrfCooldown = 0;
+      g.gunnery.lase();
+      g.views.aimAt(t.centre, true);
+      g.step(0.05);
+    }
+    for (let i = 0; i < 20; i++) g.hud.update(0.05, g);
+  });
+  await mp.waitForTimeout(500);
+  await mp.screenshot({ path: join(OUT, 'mobile-play.png'), animations: 'disabled', timeout: 90000 });
+  console.log('shot mobile-play.png');
+
+  await mp.setViewportSize({ width: h, height: w });
+  await mp.waitForTimeout(400);
+  await mp.screenshot({ path: join(OUT, 'mobile-portrait.png'), animations: 'disabled', timeout: 90000 });
+  console.log('shot mobile-portrait.png');
+  await phone.close();
+} else if (mode === 'bundle') {
   // Smoke-test the single-file build: it must boot and run with no import map
   // and no separate requests. If an artifact fragment was also built, wrap it
   // in a minimal skeleton the way a host would and check that too.

@@ -51,9 +51,10 @@ export class Graphics {
    * @param {THREE.DirectionalLight} sun   key light, whose shadow map is the
    *                                       single most expensive setting here
    */
-  constructor(renderer, sun) {
+  constructor(renderer, sun, { mobile = false } = {}) {
     this.renderer = renderer;
     this.sun = sun;
+    this.mobile = mobile;
 
     this.presetName = this._loadPreset();
     /** Multiplier the adaptive scaler applies on top of the preset. */
@@ -113,7 +114,7 @@ export class Graphics {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved && CONFIG.quality.presets[saved]) return saved;
     } catch { /* private mode, blocked storage — fall through */ }
-    return CONFIG.quality.default;
+    return this.mobile ? CONFIG.quality.mobileDefault : CONFIG.quality.default;
   }
 
   _savePreset() {

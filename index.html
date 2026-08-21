@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#05070a" />
 <title>LYNX XM30</title>
 <link rel="stylesheet" href="styles/hud.css" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#127950;</text></svg>" />
@@ -64,6 +68,35 @@
 
   <!-- Range gate: the box the player brackets a target with while ranging -->
   <div id="range-gate" class="range-gate" hidden><span></span></div>
+</div>
+
+<!-- ============================ TOUCH CONTROLS =========================== -->
+<div id="touch" class="touch-ui" hidden>
+  <div class="touch-left">
+    <div class="touch-steer" id="touch-steer">
+      <i class="knob"></i>
+      <b>&#9664;</b><span>STEER</span><b>&#9654;</b>
+    </div>
+    <div class="touch-speed">
+      <button class="tbtn tiny" data-tap="KeyS" aria-label="Reduce speed">SLOW</button>
+      <button class="tbtn tiny" data-tap="KeyW" aria-label="Increase speed">FAST</button>
+    </div>
+  </div>
+
+  <div class="touch-right">
+    <div class="touch-modes">
+      <button class="tbtn tiny" data-tap="zoom" aria-label="Magnification">ZOOM</button>
+      <button class="tbtn tiny" data-tap="Tab" aria-label="Swap seat">SEAT</button>
+      <button class="tbtn tiny" data-tap="KeyV" aria-label="Toggle view">VIEW</button>
+      <button class="tbtn tiny" data-tap="KeyR" aria-label="Change ammunition">AMMO</button>
+      <button class="tbtn tiny" data-tap="KeyP" aria-label="Pause">&#10073;&#10073;</button>
+    </div>
+    <div class="touch-actions">
+      <button class="tbtn wide" data-tap="lase" aria-label="Lase for range">LASE</button>
+      <button class="tbtn wide" data-hold="Space" aria-label="Coaxial machine gun">COAX</button>
+      <button class="tbtn fire" data-hold="fire" aria-label="Fire main gun">FIRE</button>
+    </div>
+  </div>
 </div>
 
 <!-- 3D-tracked labels for contacts get injected here -->
@@ -202,6 +235,7 @@
         </div>
       </div>
       <div>
+        <div id="key-help">
         <h2>Controls</h2>
         <table class="keys">
           <tr><td><kbd>Mouse</kbd></td><td>Traverse / elevate the sight you are looking through</td></tr>
@@ -221,13 +255,41 @@
           <tr><td><kbd>G</kbd></td><td>GPU and performance readout</td></tr>
           <tr><td><kbd>H</kbd></td><td>Show / hide this help &nbsp;·&nbsp; <kbd>P</kbd> pause</td></tr>
         </table>
+        </div>
       </div>
     </div>
 
-    <button id="start-btn" class="start-btn">START RUN</button>
+    <div class="boot-actions">
+      <button id="start-btn" class="start-btn">START RUN</button>
+      <button id="fullscreen-btn" class="ghost-btn" hidden>FULL SCREEN</button>
+    </div>
+
+    <div class="touch-help" id="touch-help" hidden>
+      <h2>Touch controls</h2>
+      <table class="keys">
+        <tr><td><kbd>Drag</kbd></td><td>Anywhere on the view to slew the sight</td></tr>
+        <tr><td><kbd>STEER</kbd></td><td>Slide left or right to direct the driver</td></tr>
+        <tr><td><kbd>FIRE</kbd></td><td>Main gun <em>(gunner)</em> · designate <em>(spotter)</em></td></tr>
+        <tr><td><kbd>LASE</kbd></td><td>Range the target before you shoot</td></tr>
+        <tr><td><kbd>ZOOM</kbd></td><td>Cycle magnification &mdash; how you identify a contact</td></tr>
+        <tr><td><kbd>SEAT</kbd></td><td>Swap between gunner and spotter</td></tr>
+      </table>
+    </div>
     <p class="fineprint" id="boot-fineprint">
       Vehicle geometry is a good-faith approximation from published Lynx&nbsp;KF41 / XM30 figures &mdash; a game model, not engineering data.
     </p>
+  </div>
+</div>
+
+<div id="rotate" class="overlay rotate" hidden>
+  <div class="rotate-card">
+    <svg viewBox="0 0 64 44" class="rotate-glyph" aria-hidden="true">
+      <rect x="2" y="4" width="26" height="36" rx="3" />
+      <rect x="34" y="12" width="28" height="20" rx="3" />
+      <path d="M30 34 q4 6 10 6" />
+    </svg>
+    <h2>ROTATE TO LANDSCAPE</h2>
+    <p>The sight picture needs the width.</p>
   </div>
 </div>
 

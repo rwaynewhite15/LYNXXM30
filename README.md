@@ -18,6 +18,9 @@ npm start            # or: python3 -m http.server 8080
 Then open <http://localhost:8080/>. There is no build step and no network
 dependency — three.js is vendored into `vendor/`.
 
+Works on a phone or tablet: see [Playing on a phone](#playing-on-a-phone).
+To host it, see [GitHub Pages](#hosting-on-github-pages).
+
 - `index.html` — the game
 - `inspect.html` — a standalone model inspector: orbit the vehicle, work the
   turret, gun and commander's sight, and read the measured envelope
@@ -122,6 +125,70 @@ first, and taking it at range.
 
 ---
 
+## Playing on a phone
+
+Hold the device in **landscape** — the game asks you to turn it if you don't,
+because a portrait sight picture is a slit. Touch controls appear automatically
+on any device with a touchscreen.
+
+| Control | Action |
+| --- | --- |
+| **Drag anywhere on the view** | Slew the sight. This is the primary interaction, so it gets the whole screen rather than a thumbstick. |
+| **STEER** pad, bottom left | Slide to direct the driver. Proportional, not on/off — a nudge changes lane, a full push swerves. Springs back to centre. |
+| **SLOW / FAST** | Order a speed change. |
+| **FIRE** | Main gun. Relabels to **MARK** in the spotter's seat, where the action is designating rather than shooting. |
+| **LASE** | Range the target. Do this before you fire. |
+| **COAX** | Machine gun; hold it. |
+| **ZOOM / SEAT / VIEW / AMMO** | Magnification, swap seat, sight ↔ external, ammunition. |
+
+Aiming and firing are deliberately on separate controls. A tap-to-fire scheme
+reads well in a screenshot but makes it impossible to track a target and shoot
+it at the same moment, which is most of this game.
+
+The HUD switches to a compact layout below roughly 560 px of height: the panels
+stack into two columns clear of your thumbs, the optic surround becomes an
+ellipse rather than a circle so a 2.2:1 phone screen isn't half black, and the
+turret repeater and hint bar drop out. Every touch target clears 44 px, and the
+whole HUD is inset from the notch and home indicator via `env(safe-area-inset-*)`.
+
+Phones default to the **LOW** graphics preset — press **ZOOM**'s neighbour, or
+`Q` on a keyboard, to raise it. The adaptive scaler will pull resolution back
+if frames run long, so a slower device degrades gracefully rather than
+stuttering.
+
+If your browser supports it, **FULL SCREEN** on the title card hides the
+browser chrome; iPhone Safari has no Fullscreen API at all, so the button hides
+itself there. Adding the page to your home screen gets you the same result.
+
+---
+
+## Hosting on GitHub Pages
+
+Yes — it's a static site with no build step, and every path in it is relative,
+so it works from a project subpath like `https://<user>.github.io/LYNXXM30/`.
+The verification suite runs the whole game from exactly that kind of subpath so
+an absolute path can't creep back in unnoticed.
+
+`.github/workflows/pages.yml` is already here. **One manual step is required**,
+and nothing can do it for you:
+
+> Repository **Settings → Pages → Build and deployment → Source: GitHub Actions**
+
+Until that's set, the workflow runs and fails at the deploy step with an error
+saying Pages isn't enabled. Once it's set, every push to `main` or to the
+feature branch publishes, and you can also run it by hand from the Actions tab.
+
+The workflow copies only what the browser loads — `index.html`, `inspect.html`,
+`styles/`, `src/`, `vendor/` — adds a `.nojekyll` marker so Pages doesn't run
+the tree through Jekyll, and fails the build if it finds a root-absolute `src`
+or `href` in either entry point.
+
+If you'd rather not use Actions, the `gh-pages`-branch route works too: the
+repository root is already a valid site, so pointing Pages at a branch and the
+`/` folder serves it as-is.
+
+---
+
 ## Graphics and the GPU
 
 Rendering is WebGL2 throughout, so the work lands on your GPU — the renderer
@@ -218,29 +285,39 @@ src/
     input.js          pointer lock and latched keys
     audio.js          synthesised — no sample files
     graphics.js       quality presets, adaptive resolution, GPU readout
+    touch.js          touch controls, feeding the same input state as a mouse
 tools/
   verify.mjs          end-to-end checks in a real browser
   shoot.mjs           headless screenshots of the model and the game
   bundle.mjs          single-file build
   balance.mjs         unattended survivability probe
+.github/workflows/
+  pages.yml           static deploy to GitHub Pages
 vendor/three/         three.js r185, MIT
 ```
 
 ## Development
 
 ```
-node tools/verify.mjs            # 33 end-to-end checks, exits non-zero on failure
+node tools/verify.mjs            # 64 end-to-end checks, exits non-zero on failure
 node tools/shoot.mjs inspect     # renders the model from six angles into .shots/
 node tools/shoot.mjs game 40     # boots the game, simulates 40 s, screenshots it
 node tools/bundle.mjs            # writes dist/lynx-xm30.html, one self-contained file
 node tools/shoot.mjs bundle      # smoke-tests that build: must boot with zero sub-requests
 node tools/balance.mjs           # how far each difficulty gets with no player input
+node tools/shoot.mjs mobile      # renders the phone layout at 844x390, landscape and portrait
 ```
 
 `tools/shoot.mjs` and `tools/verify.mjs` drive a real browser through
 Playwright and advance the simulation deterministically with
 `window.__game.simulate(seconds)`, so results do not depend on how fast the
-software renderer happens to be.
+software renderer happens to be. Tests that exercise the controls themselves
+use `window.__game.tickOnce(dt)` instead, which runs a whole frame's logic —
+input included — without rendering.
+
+The mobile checks run in a second browser context with `hasTouch` and no mouse,
+and drive the real pointer handlers with synthesised touch events rather than
+calling internals.
 
 ## Licence
 

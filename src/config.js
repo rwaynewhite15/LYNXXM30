@@ -18,6 +18,15 @@ export const CONFIG = {
     maxPixelRatio: 2,
   },
 
+  touch: {
+    // A finger travels a fraction of the distance a mouse does, so the same
+    // pixel delta has to cover much more of the sight picture.
+    lookGain: 2.4,
+    // Fraction of the steer pad's travel treated as centre, so a resting
+    // thumb does not creep the vehicle across the road.
+    steerDeadZone: 0.12,
+  },
+
   /**
    * Graphics presets.
    *
@@ -29,7 +38,19 @@ export const CONFIG = {
    */
   quality: {
     default: 'balanced',
+    // Phones and tablets start lower; the player can still raise it.
+    mobileDefault: 'low',
     presets: {
+      minimal: {
+        label: 'MINIMAL',
+        renderScale: 0.75,
+        shadows: false,
+        softShadows: false,
+        shadowMap: 1024,
+        shadowDistance: 45,
+        anisotropy: 1,
+        streamAhead: 300,
+      },
       low: {
         label: 'LOW',
         // Render scale is ABSOLUTE, not a fraction of the display's device
@@ -38,11 +59,13 @@ export const CONFIG = {
         // to devicePixelRatio would make the setting do nothing at all on the
         // 1x displays most desktops still use.
         renderScale: 1.0,
-        shadows: false,
+        // Hard shadows rather than none: dropping them entirely flattens the
+        // scene badly, and PCF costs a fraction of PCFSoft.
+        shadows: true,
         softShadows: false,
         shadowMap: 1024,
-        shadowDistance: 60,
-        anisotropy: 1,
+        shadowDistance: 55,
+        anisotropy: 4,
         streamAhead: 460,
       },
       balanced: {

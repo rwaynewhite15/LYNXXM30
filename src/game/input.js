@@ -21,6 +21,15 @@ export class Input {
     this.clicked = new Set();
     this.locked = false;
     this.enabled = false;
+    /** Set by the touch layer while the steer pad is held; null otherwise. */
+    this.touchSteer = null;
+    /**
+     * 'mouse' or 'touch'. In touch mode the class ignores mouse events and
+     * never asks for pointer lock — phones synthesise mousedown and mousemove
+     * from taps, which would otherwise double-apply the sight movement the
+     * touch layer is already sending and fire the gun on every drag.
+     */
+    this.pointerMode = 'mouse';
     /** True once pointer lock has been refused and we are tracking manually. */
     this.fallback = false;
     this.onLockChange = null;
@@ -40,6 +49,7 @@ export class Input {
     this._onBlur = () => { this.keys.clear(); this.buttons.clear(); };
 
     this._onMove = (e) => {
+      if (this.pointerMode === 'touch') return;
       if (this.locked) {
         this.look.dx += e.movementX || 0;
         this.look.dy += e.movementY || 0;
@@ -56,7 +66,7 @@ export class Input {
       this._lastClient = { x: e.clientX, y: e.clientY };
     };
     this._onDown = (e) => {
-      if (!this.enabled) return;
+      if (!this.enabled || this.pointerMode === 'touch') return;
       // Keyboard events need the canvas focused, which matters inside an
       // iframe where the page does not get focus for free.
       this.canvas.focus?.({ preventScroll: true });
@@ -83,7 +93,7 @@ export class Input {
   }
 
   requestLock() {
-    if (!this.enabled || this.fallback) return;
+    if (!this.enabled || this.fallback || this.pointerMode === 'touch') return;
     if (!this.canvas.requestPointerLock) { this._useFallback(); return; }
     let p;
     try {
@@ -118,6 +128,63 @@ export class Input {
 
   releaseLock() {
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+  }
+
+  /* ------------------------------ virtual input ---------------------------- */
+  /**
+   * The touch layer drives the game through these rather than through a
+   * parallel code path, so every control ends up in the same latched state the
+   * keyboard and mouse produce and nothing downstream has to know the
+   * difference.
+   */
+
+  /** Press and hold a key, as if the player were holding it down. */
+  virtualDown(code) {
+    if (!this.keys.has(code)) this.pressed.add(code);
+    this.keys.add(code);
+  }
+
+  virtualUp(code) { this.keys.delete(code); }
+
+  /** A single-frame key press, for taps on a momentary control. */
+  virtualTap(code) { this.pressed.add(code); }
+
+  virtualMouseDown(btn) {
+    if (!this.buttons.has(btn)) this.clicked.add(btn);
+    this.buttons.add(btn);
+  }
+
+  virtualMouseUp(btn) { this.buttons.delete(btn); }
+
+  /** A single-frame mouse click, for tap-style buttons like the range-finder. */
+  virtualMouseTap(btn) { this.clicked.add(btn); }
+
+  /** Feeds sight movement from a source other than the mouse. */
+  injectLook(dx, dy) {
+    this.look.dx += dx;
+    this.look.dy += dy;
+  }
+
+  /**
+   * Steering order, -1 (port) to +1 (starboard).
+   *
+   * A touch pad supplies a proportional value; the keys are all-or-nothing.
+   * The driving model already accepts a float, so the pad gives finer control
+   * over a lane change than the keyboard does.
+   */
+  get steer() {
+    if (this.touchSteer !== null && this.touchSteer !== undefined) return this.touchSteer;
+    return (this.down('KeyD') || this.down('ArrowRight') ? 1 : 0)
+         - (this.down('KeyA') || this.down('ArrowLeft') ? 1 : 0);
+  }
+
+  /**
+   * Switches between the mouse and touch input paths.
+   * @param {'mouse'|'touch'} mode
+   */
+  setPointerMode(mode) {
+    this.pointerMode = mode;
+    if (mode === 'touch') { this.buttons.clear(); this.locked = false; }
   }
 
   /** True while held. */
@@ -156,6 +223,7 @@ export class Input {
 /** Keys the game consumes, so the page doesn't scroll under the player. */
 const HANDLED = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyV', 'KeyX', 'KeyT', 'KeyR',
+  'KeyQ', 'KeyG',
   'KeyH', 'KeyP', 'Tab', 'Space', 'Digit1', 'Digit2', 'Digit3',
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
 ]);

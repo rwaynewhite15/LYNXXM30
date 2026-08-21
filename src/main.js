@@ -21,11 +21,24 @@ import { Perception, LEVEL } from './game/perception.js';
 import { Gunnery } from './game/gunnery.js';
 import { Audio } from './game/audio.js';
 import { Hud } from './game/hud.js';
+import { Graphics } from './game/graphics.js';
+import { TouchControls } from './game/touch.js';
 
 const canvas = document.getElementById('viewport');
 const bootOverlay = document.getElementById('boot');
 const pauseOverlay = document.getElementById('pause');
 const aarOverlay = document.getElementById('after-action');
+const rotateOverlay = document.getElementById('rotate');
+
+/**
+ * Touch capability decides the control scheme; screen size decides the HUD
+ * layout. They are separate questions — a touchscreen laptop wants the touch
+ * controls at desktop size, and a small desktop window wants the compact HUD
+ * without them.
+ */
+const IS_TOUCH = TouchControls.available();
+/** A touchscreen laptop still has a mouse; a phone does not. */
+const HAS_MOUSE = matchMedia('(any-pointer: fine)').matches;
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -35,7 +48,7 @@ const _v2 = new THREE.Vector3();
 /* ========================================================================== */
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, CONFIG.render.maxPixelRatio));
+// Render scale is owned by the Graphics manager (see game/graphics.js).
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -74,6 +87,11 @@ const fill = new THREE.DirectionalLight(0x9fbcdd, 0.34);
 fill.position.set(-1, 0.6, -0.6);
 scene.add(fill);
 
+// Owns render resolution, shadow cost, texture filtering and the GPU readout.
+// Constructed here so the quality preset is applied before anything is drawn.
+const graphics = new Graphics(renderer, sun, { mobile: IS_TOUCH });
+graphics.useMaterials(materials());
+
 /* ========================================================================== */
 /*  Game                                                                      */
 /* ========================================================================== */
@@ -88,11 +106,29 @@ class Game {
     this.difficultyKey = 'standard';
 
     this.hud = new Hud();
+    this.graphics = graphics;
+    this.showDiagnostics = false;
+    graphics.onResize = () => this.resize();
+    graphics.onChange = (preset) => this.hud.say(`GRAPHICS → ${preset.label}`);
     this.audio = new Audio();
     this.input = new Input(canvas);
+
+    // Touch drives the same latched input state the keyboard and mouse do.
+    this.touch = new TouchControls(canvas, this.input);
+    this.touch.setEnabled(IS_TOUCH);
+    this.touch.setSeat(this.seatChoice);
+    if (IS_TOUCH && !HAS_MOUSE) {
+      // No mouse at all: pointer lock is meaningless, and the synthetic mouse
+      // events a phone fires would fight the touch layer.
+      this.input.setPointerMode('touch');
+      document.body.classList.add('touch-only');
+    }
     this.input.onLockChange = (locked) => {
       document.body.classList.toggle('playing', locked);
-      if (!locked && this.state === 'running' && !this.input.fallback) this.pause(true);
+      if (!locked && this.state === 'running'
+          && !this.input.fallback && this.input.pointerMode !== 'touch') {
+        this.pause(true);
+      }
     };
     this.input.onFallback = () => {
       this.hud.say('POINTER LOCK UNAVAILABLE — move the mouse over the view to traverse', 'warn');
@@ -255,6 +291,9 @@ class Game {
     this.state = 'paused';
     pauseOverlay.hidden = false;
     this.audio.suspend();
+    // A finger lifted off the screen during a pause never sends its pointerup,
+    // so drop anything still held or the gun keeps firing on resume.
+    this.touch.releaseHeld();
     if (!auto) this.input.releaseLock();
   }
 
@@ -272,6 +311,8 @@ class Game {
     this.state = 'over';
     this.input.releaseLock();
     this.input.enabled = false;
+    this.touch.releaseHeld();
+    this.touch.setEnabled(false);
     this.audio.suspend();
 
     const s = this.score;
@@ -300,12 +341,27 @@ class Game {
     const { input, views, gunnery, driving, hud, perception } = this;
 
     if (input.hit('KeyP')) { this.state === 'paused' ? this.resume() : this.pause(); }
+
+    // Graphics controls stay live while paused — that is when you want to
+    // change them.
+    if (input.hit('KeyQ')) this.graphics.cycle();
+    if (input.hit('KeyG')) {
+      this.showDiagnostics = !this.showDiagnostics;
+      if (this.showDiagnostics) {
+        const gpu = this.graphics.gpu;
+        hud.say(gpu.software
+          ? 'RENDERER — software fallback, no GPU in use'
+          : `RENDERER — ${gpu.short || gpu.device}`);
+      }
+    }
+
     if (this.state !== 'running') return;
 
     if (input.hit('Tab')) {
       const seat = views.swapSeat();
       hud.say(`SEAT → ${views.seatDef.label}`);
       this.seatChoice = seat;
+      this.touch.setSeat(seat);
     }
     if (input.hit('KeyV')) hud.say(`VIEW → ${views.toggleMode() === 'sight' ? 'SIGHT' : 'EXTERNAL'}`);
     if (input.hit('KeyC') && views.mode === 'chase') hud.say(`CAMERA → ${views.cycleChase()}`);
@@ -383,6 +439,24 @@ class Game {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+
+    // Compact layout is a question about available height, not about touch:
+    // the desktop panels need roughly 560 px of it to not swamp the sight.
+    const compact = h < 560 || w < 760;
+    document.body.classList.toggle('compact', compact);
+    this._checkOrientation();
+  }
+
+  /**
+   * A phone held upright has no room for a sight picture, so the run is held
+   * until it is turned. Only ever shown on a touch device — a narrow desktop
+   * window is portrait too, and nobody is going to rotate their monitor.
+   */
+  _checkOrientation() {
+    const portrait = IS_TOUCH && innerHeight > innerWidth * 1.05;
+    if (rotateOverlay.hidden === !portrait) return;
+    rotateOverlay.hidden = !portrait;
+    if (portrait && this.state === 'running') this.pause();
   }
 
   /**
@@ -392,8 +466,8 @@ class Game {
   step(dt) {
     if (this.state !== 'running') return;
 
-    const steer = (this.input.down('KeyD') || this.input.down('ArrowRight') ? 1 : 0)
-                - (this.input.down('KeyA') || this.input.down('ArrowLeft') ? 1 : 0);
+    // Proportional from the touch pad, all-or-nothing from the keys.
+    const steer = this.input.steer;
 
     const before = this.driving.collisions.length;
     this.driving.update(dt, steer);
@@ -428,6 +502,18 @@ class Game {
   simulate(seconds, dt = 1 / 60) {
     const steps = Math.floor(seconds / dt);
     for (let i = 0; i < steps; i++) this.step(dt);
+  }
+
+  /**
+   * One whole frame's worth of logic — input, simulation, and clearing the
+   * edge-triggered input state — without rendering. `simulate` deliberately
+   * skips input so a headless run is not steered by stale key state; anything
+   * testing the controls themselves wants this instead.
+   */
+  tickOnce(dt = 1 / 60) {
+    this._handleInput(dt);
+    this.step(dt);
+    this.input.endFrame();
   }
 
   frame(now) {
@@ -518,7 +604,12 @@ class Game {
       levels: this._contactLevels(),
       triangles: renderer.info.render.triangles,
       calls: renderer.info.render.calls,
-      fps: Math.round(1 / Math.max(0.001, this._smoothDt ?? 0.016)),
+      fps: Math.round(this.graphics.fps),
+      frameMs: Number(this.graphics.frameMs.toFixed(2)),
+      quality: this.graphics.presetName,
+      renderScale: Number(this.graphics.report().renderScale.toFixed(2)),
+      gpu: this.graphics.gpu.short,
+      softwareRenderer: this.graphics.gpu.software,
     };
   }
 }
@@ -587,6 +678,34 @@ canvas.addEventListener('click', () => {
 });
 
 addEventListener('resize', () => game.resize());
+addEventListener('orientationchange', () => setTimeout(() => game.resize(), 120));
+// Mobile browsers change the visual viewport when chrome slides away.
+visualViewport?.addEventListener('resize', () => game.resize());
+
+/* ------------------------------ boot screen ------------------------------ */
+
+// On a touch device the keyboard reference is noise, so the touch block
+// replaces it.
+if (IS_TOUCH) {
+  const help = document.getElementById('touch-help');
+  if (help) help.hidden = false;
+}
+
+const fsBtn = document.getElementById('fullscreen-btn');
+if (fsBtn && document.documentElement.requestFullscreen) {
+  fsBtn.hidden = false;
+  fsBtn.addEventListener('click', async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    } catch {
+      // Blocked by the embedding page or unsupported (iPhone Safari has no
+      // Fullscreen API at all). Nothing to recover — the game still runs.
+      fsBtn.hidden = true;
+    }
+    setTimeout(() => game.resize(), 150);
+  });
+}
 
 /* --------------------------------- loop ---------------------------------- */
 
@@ -598,6 +717,7 @@ function tick(now) {
   lastFrame = now;
   smooth += (raw - smooth) * 0.08;
   game._smoothDt = smooth;
+  graphics.sample(raw);
   if (game.state === 'boot') {
     // Nothing to simulate yet; keep the canvas cleared behind the overlay.
     renderer.render(scene, camera);

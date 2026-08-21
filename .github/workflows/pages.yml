@@ -1,0 +1,80 @@
+# Publishes the game to GitHub Pages.
+#
+# There is no build step: the site is the repository's static files, three.js
+# included, so "building" is copying the runtime files into _site and marking
+# it as not-Jekyll.
+#
+# Pages is switched on by the workflow itself (see `enablement` below), using
+# the run's own pages:write permission, so no repository setting has to be
+# changed by hand first.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - claude/lynx-xm30-3d-game-ud0bor
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push supersedes an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          # Only the files the browser actually loads. tools/ needs Node and
+          # Playwright and has no business being served.
+          cp index.html inspect.html _site/
+          cp -r styles src vendor _site/
+          # Without this, Pages runs the tree through Jekyll, which ignores
+          # anything beginning with an underscore.
+          touch _site/.nojekyll
+          echo "Site contents:" && find _site -maxdepth 2 -type d | sort
+
+      - name: Check the site is self-contained
+        run: |
+          # Every reference in the entry points must be relative, or the site
+          # breaks when served from /<repo>/ rather than the domain root.
+          if grep -nE '(src|href)="/[^/]' _site/index.html _site/inspect.html; then
+            echo "::error::absolute path found — it will 404 under a project subpath"
+            exit 1
+          fi
+          test -f _site/vendor/three/three.module.min.js
+          test -f _site/src/main.js
+
+      - uses: actions/configure-pages@v5
+        with:
+          # Turns Pages on for the repository if it is off, and sets the source
+          # to GitHub Actions. Needs the pages:write permission granted above.
+          # Without this the run fails here on a repository that has never had
+          # Pages enabled, which is every repository until someone clicks the
+          # setting.
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

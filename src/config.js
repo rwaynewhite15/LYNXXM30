@@ -18,6 +18,90 @@ export const CONFIG = {
     maxPixelRatio: 2,
   },
 
+  touch: {
+    // A finger travels a fraction of the distance a mouse does, so the same
+    // pixel delta has to cover much more of the sight picture.
+    lookGain: 2.4,
+    // Fraction of the steer pad's travel treated as centre, so a resting
+    // thumb does not creep the vehicle across the road.
+    steerDeadZone: 0.12,
+  },
+
+  /**
+   * Graphics presets.
+   *
+   * The renderer is WebGL2 throughout, so the work always lands on the GPU;
+   * these presets decide how much of it to ask for. Each one moves the four
+   * settings that actually cost something — render resolution, shadow map
+   * size and range, texture filtering, and how far ahead the route is built —
+   * together, so a single choice stays coherent.
+   */
+  quality: {
+    default: 'balanced',
+    // Phones and tablets start lower; the player can still raise it.
+    mobileDefault: 'low',
+    presets: {
+      minimal: {
+        label: 'MINIMAL',
+        renderScale: 0.75,
+        shadows: false,
+        softShadows: false,
+        shadowMap: 1024,
+        shadowDistance: 45,
+        anisotropy: 1,
+        streamAhead: 300,
+      },
+      low: {
+        label: 'LOW',
+        // Render scale is ABSOLUTE, not a fraction of the display's device
+        // pixel ratio: on a Retina panel 1.0 halves the buffer and saves a lot
+        // of fill rate, and on a 1x monitor 2.0 supersamples. Clamping these
+        // to devicePixelRatio would make the setting do nothing at all on the
+        // 1x displays most desktops still use.
+        renderScale: 1.0,
+        // Hard shadows rather than none: dropping them entirely flattens the
+        // scene badly, and PCF costs a fraction of PCFSoft.
+        shadows: true,
+        softShadows: false,
+        shadowMap: 1024,
+        shadowDistance: 55,
+        anisotropy: 4,
+        streamAhead: 460,
+      },
+      balanced: {
+        label: 'BALANCED',
+        renderScale: 1.5,
+        shadows: true,
+        softShadows: true,
+        shadowMap: 2048,
+        shadowDistance: 90,
+        anisotropy: 8,
+        streamAhead: 780,
+      },
+      high: {
+        label: 'HIGH',
+        renderScale: 2.0,
+        shadows: true,
+        softShadows: true,
+        shadowMap: 4096,
+        shadowDistance: 150,
+        anisotropy: 16,
+        streamAhead: 1150,
+      },
+    },
+
+    // Adaptive resolution. Frames that run long trim the render scale; frames
+    // with headroom give it back, up to the preset's own ceiling.
+    adaptive: true,
+    adjustInterval: 0.75,   // seconds between decisions
+    slowFrameMs: 22,        // below ~45 fps: back off
+    fastFrameMs: 13,        // above ~77 fps: there is room to spare
+    resStep: 0.1,
+    minResScale: 0.6,
+    // Hard ceiling on the drawing buffer, whatever a preset asks for.
+    maxRenderScale: 2.0,
+  },
+
   route: {
     // A run is a fixed stretch of road. Reaching the end is the win state.
     length: 4000,

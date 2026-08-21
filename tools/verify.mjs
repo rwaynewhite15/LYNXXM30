@@ -15,9 +15,15 @@ import { extname, join, normalize } from 'node:path';
 const ROOT = process.cwd();
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css' };
 
+// GitHub Pages serves a project site from /<repo>/, not the domain root, so
+// the checks run against that prefix — an absolute path anywhere in the entry
+// points would 404 there and nowhere else.
+const PREFIX = '/LYNXXM30';
+
 const server = createServer(async (req, res) => {
   try {
     let p = decodeURIComponent(req.url.split('?')[0]);
+    if (p.startsWith(PREFIX)) p = p.slice(PREFIX.length) || '/';
     if (p === '/') p = '/index.html';
     const file = join(ROOT, normalize(p).replace(/^(\.\.[/\\])+/, ''));
     // Read BEFORE writing headers, or a miss tries to send a second response.
@@ -27,7 +33,7 @@ const server = createServer(async (req, res) => {
   } catch { res.writeHead(404).end('not found'); }
 });
 await new Promise((r) => server.listen(0, r));
-const base = `http://127.0.0.1:${server.address().port}`;
+const base = `http://127.0.0.1:${server.address().port}${PREFIX}`;
 
 const CHROME = process.env.CHROME_PATH
   || join(process.env.PLAYWRIGHT_BROWSERS_PATH || '/opt/pw-browsers', 'chromium');
@@ -355,6 +361,82 @@ check('the third-person camera sits back from the vehicle',
 check('the first-person camera sits inside the vehicle',
   sightDist < 3, `${sightDist.toFixed(1)} m from hull centre`);
 
+/* ---------------------------------------------------------------- graphics */
+console.log('\nGRAPHICS');
+const graphics = await page.evaluate(() => {
+  const g = window.__game;
+  const gfx = g.graphics;
+  const start = gfx.report();
+
+  // Walk every preset and record what each one costs.
+  const presets = [];
+  for (const name of ['minimal', 'low', 'balanced', 'high']) {
+    gfx.apply(name, { silent: true });
+    const r = gfx.report();
+    presets.push({
+      name,
+      renderScale: r.renderScale,
+      shadows: r.preset.shadows,
+      shadowMap: r.preset.shadowMap,
+      streamAhead: r.preset.streamAhead,
+    });
+  }
+  gfx.apply('balanced', { silent: true });
+
+  // Adaptive scaler: a run of slow frames must reduce the render scale.
+  gfx.adaptive = true;
+  const before = gfx.resScale;
+  for (let i = 0; i < 200; i++) gfx.sample(0.050);   // 20 fps
+  const afterSlow = gfx.resScale;
+  for (let i = 0; i < 400; i++) gfx.sample(0.008);   // 125 fps
+  const afterFast = gfx.resScale;
+
+  // Open the readout and let the HUD populate it.
+  g.showDiagnostics = true;
+  for (let i = 0; i < 5; i++) g.hud.update(0.3, g);
+
+  return {
+    gpu: start.gpu,
+    presets,
+    adaptive: { before, afterSlow, afterFast },
+    panelHidden: document.getElementById('diagnostics').hidden,
+    panelGpu: document.getElementById('diag-gpu').textContent.trim(),
+    panelApi: document.getElementById('diag-api').textContent.trim(),
+    panelCalls: document.getElementById('diag-calls').textContent.trim(),
+    warnShown: !document.getElementById('diag-warn').hidden,
+  };
+});
+
+check('the renderer reports a WebGL2 context',
+  /WebGL\s*2/i.test(graphics.gpu.api), graphics.gpu.api);
+check('the GPU adapter is identified',
+  graphics.gpu.device !== 'unavailable' && graphics.gpu.short.length > 0,
+  graphics.gpu.short);
+check('software rendering is detected and flagged',
+  graphics.gpu.software === true && graphics.warnShown,
+  graphics.gpu.software ? 'flagged (this container has no GPU)' : 'hardware adapter — warning correctly absent');
+check('quality presets scale render resolution independently of the display',
+  graphics.presets[0].renderScale < graphics.presets[2].renderScale,
+  graphics.presets.map((p) => `${p.name} ${p.renderScale}x`).join(', '));
+check('quality presets scale the shadow map',
+  graphics.presets[0].shadowMap < graphics.presets[2].shadowMap,
+  graphics.presets.map((p) => p.shadowMap).join(' → '));
+check('the cheapest preset drops shadows, the next keeps them',
+  graphics.presets[0].shadows === false && graphics.presets[1].shadows === true,
+  graphics.presets.map((p) => `${p.name} ${p.shadows ? 'on' : 'off'}`).join(', '));
+check('quality presets scale the streaming distance',
+  graphics.presets[0].streamAhead < graphics.presets[2].streamAhead,
+  graphics.presets.map((p) => `${p.streamAhead} m`).join(' → '));
+check('adaptive resolution backs off on slow frames',
+  graphics.adaptive.afterSlow < graphics.adaptive.before,
+  `${graphics.adaptive.before.toFixed(2)} → ${graphics.adaptive.afterSlow.toFixed(2)}`);
+check('adaptive resolution recovers when frames are fast',
+  graphics.adaptive.afterFast > graphics.adaptive.afterSlow,
+  `${graphics.adaptive.afterSlow.toFixed(2)} → ${graphics.adaptive.afterFast.toFixed(2)}`);
+check('the readout populates when opened',
+  !graphics.panelHidden && graphics.panelGpu.length > 3 && /\d/.test(graphics.panelCalls),
+  `${graphics.panelApi} · ${graphics.panelCalls} calls`);
+
 /* --------------------------------------------------------------------- HUD */
 console.log('\nHUD');
 const hud = await page.evaluate(() => {
@@ -378,10 +460,170 @@ check('the range readout is populated', /\d/.test(hud.range), hud.range + ' m');
 check('the seat indicator matches the active seat', hud.seat.length > 0, hud.seat);
 check('the speedometer reads a road speed', Number(hud.speed) > 0, hud.speed + ' km/h');
 
+/* ------------------------------------------------------------------- mobile */
+console.log('\nMOBILE');
+
+// Release the desktop page first. Two live WebGL contexts under a software
+// rasteriser is enough to push the next page load past its timeout.
+await page.close();
+
+// A phone in landscape, with touch and no mouse at all.
+const phone = await browser.newContext({
+  viewport: { width: 844, height: 390 },
+  deviceScaleFactor: 3,
+  hasTouch: true,
+  isMobile: true,
+});
+const mp = await phone.newPage();
+const mobileErrors = [];
+mp.on('pageerror', (e) => mobileErrors.push(e.message));
+mp.on('console', (m) => {
+  if (m.type() === 'error' && !m.text().includes('favicon')) mobileErrors.push(m.text());
+});
+
+await mp.goto(base + '/index.html?seed=20260821', { waitUntil: 'load', timeout: 90000 });
+await mp.waitForFunction('window.__ready === true', { timeout: 40000 });
+
+// The start button must be reachable without scrolling the boot card.
+const bootFit = await mp.evaluate(() => {
+  const btn = document.getElementById('start-btn').getBoundingClientRect();
+  return { bottom: Math.round(btn.bottom), viewport: innerHeight };
+});
+check('START is reachable without scrolling on a landscape phone',
+  bootFit.bottom <= bootFit.viewport,
+  `button bottom ${bootFit.bottom}px of ${bootFit.viewport}px`);
+
+const mobile = await mp.evaluate(async () => {
+  const g = window.__game;
+
+  /** Synthesises a touch pointer sequence against the real handlers. */
+  const pointer = (target, type, x, y, id = 7) => target.dispatchEvent(new PointerEvent(type, {
+    pointerId: id, pointerType: 'touch', isPrimary: true,
+    clientX: x, clientY: y, bubbles: true, cancelable: true, buttons: type === 'pointerup' ? 0 : 1,
+  }));
+
+  const before = {
+    touchVisible: !document.getElementById('touch').hidden,
+    bodyTouch: document.body.classList.contains('touch'),
+    touchOnly: document.body.classList.contains('touch-only'),
+    pointerMode: g.input.pointerMode,
+    quality: g.graphics.presetName,
+  };
+
+  document.getElementById('start-btn').click();
+  await new Promise((r) => setTimeout(r, 200));
+  g.simulate(4);
+
+  // The controls are only read by the frame loop, so the touch tests have to
+  // run whole frames rather than bare simulation steps.
+  const frames = (n, dt = 0.05) => { for (let i = 0; i < n; i++) g.tickOnce(dt); };
+
+  const compact = document.body.classList.contains('compact');
+
+  // Drag across the sight picture: the sight must traverse.
+  const az0 = g.views.aim.gunner.azDemand;
+  const canvas = document.getElementById('viewport');
+  pointer(canvas, 'pointerdown', 400, 200);
+  for (let i = 1; i <= 10; i++) pointer(canvas, 'pointermove', 400 + i * 8, 200);
+  pointer(canvas, 'pointerup', 480, 200);
+  frames(1);
+  const az1 = g.views.aim.gunner.azDemand;
+
+  // Steer pad: a proportional order, and zero again once released.
+  const pad = document.getElementById('touch-steer');
+  const r = pad.getBoundingClientRect();
+  pointer(pad, 'pointerdown', r.left + r.width * 0.9, r.top + r.height / 2, 8);
+  const steerRight = g.input.steer;
+  pointer(pad, 'pointerdown', r.left + r.width * 0.1, r.top + r.height / 2, 8);
+  const steerLeft = g.input.steer;
+  pointer(pad, 'pointerup', r.left + r.width * 0.1, r.top + r.height / 2, 8);
+  const steerCentre = g.input.steer;
+
+  // FIRE: held button must feed the same latched state the mouse does.
+  const fire = document.querySelector('[data-hold="fire"]');
+  const ammoBefore = g.gunnery.ammo.ap;
+  pointer(fire, 'pointerdown', 0, 0, 9);
+  const fireHeld = g.input.mouse(0);
+  frames(14);
+  pointer(fire, 'pointerup', 0, 0, 9);
+  const fireReleased = g.input.mouse(0);
+  const ammoSpent = ammoBefore - g.gunnery.ammo.ap;
+
+  // LASE is a tap, not a hold.
+  const lase = document.querySelector('[data-tap="lase"]');
+  pointer(lase, 'pointerdown', 0, 0, 10);
+  const lased = g.input.click(2);
+  pointer(lase, 'pointerup', 0, 0, 10);
+
+  // Seat swap relabels the primary action.
+  const seatBtn = document.querySelector('[data-tap="Tab"]');
+  pointer(seatBtn, 'pointerdown', 0, 0, 11);
+  pointer(seatBtn, 'pointerup', 0, 0, 11);
+  frames(1);
+  const fireLabel = fire.textContent.trim();
+  const seat = g.views.seat;
+
+  // Every touch target must clear the 44 px minimum.
+  const small = [...document.querySelectorAll('.tbtn')]
+    .map((b) => b.getBoundingClientRect())
+    .filter((b) => b.width < 44 || b.height < 36).length;
+
+  return {
+    ...before, compact,
+    slew: Math.abs(az1 - az0),
+    steerRight, steerLeft, steerCentre,
+    fireHeld, fireReleased, ammoSpent,
+    lased, fireLabel, seat, small,
+    controlsOnScreen: [...document.querySelectorAll('.tbtn')].every((b) => {
+      const r = b.getBoundingClientRect();
+      return r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1;
+    }),
+  };
+});
+
+check('touch controls appear on a touch device',
+  mobile.touchVisible && mobile.bodyTouch, `body.touch=${mobile.bodyTouch}`);
+check('a phone with no mouse uses the touch pointer path',
+  mobile.pointerMode === 'touch' && mobile.touchOnly, mobile.pointerMode);
+check('the HUD switches to the compact layout', mobile.compact);
+check('the mobile default quality preset is conservative',
+  mobile.quality === 'low', mobile.quality);
+check('dragging the view slews the sight',
+  mobile.slew > 0.01, `${(mobile.slew * 1000).toFixed(0)} mrad from an 80 px drag`);
+check('the steer pad gives a proportional order',
+  mobile.steerRight > 0.5 && mobile.steerLeft < -0.5,
+  `${mobile.steerLeft.toFixed(2)} … ${mobile.steerRight.toFixed(2)}`);
+check('releasing the steer pad returns to centre', mobile.steerCentre === 0);
+check('the FIRE button holds and releases',
+  mobile.fireHeld === true && mobile.fireReleased === false);
+check('holding FIRE expends ammunition', mobile.ammoSpent > 0, `${mobile.ammoSpent} rounds`);
+check('LASE registers as a tap', mobile.lased === true);
+check('swapping seat relabels the primary action',
+  mobile.seat === 'spotter' && mobile.fireLabel === 'MARK', `${mobile.seat} → ${mobile.fireLabel}`);
+check('every touch target clears the minimum size', mobile.small === 0,
+  mobile.small ? `${mobile.small} too small` : 'all ≥ 44×36 px');
+check('no control is pushed off screen at 844×390', mobile.controlsOnScreen);
+
+// Portrait must stop the run rather than render a sliver of sight picture.
+await mp.setViewportSize({ width: 390, height: 844 });
+await mp.waitForTimeout(250);
+const portrait = await mp.evaluate(() => ({
+  rotateShown: !document.getElementById('rotate').hidden,
+  state: window.__game.state,
+}));
+check('portrait raises the rotate prompt and pauses',
+  portrait.rotateShown && portrait.state === 'paused',
+  `${portrait.state}, prompt ${portrait.rotateShown ? 'shown' : 'hidden'}`);
+
+check('no page errors on mobile', mobileErrors.length === 0, mobileErrors.slice(0, 2).join(' | '));
+await phone.close();
+
 /* ------------------------------------------------------------------- errors */
 console.log('\nRUNTIME');
 check('no page errors were raised', pageErrors.length === 0,
   pageErrors.slice(0, 3).join(' | '));
+check('the whole run was served from a project subpath, as GitHub Pages does',
+  true, base);
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`);
 await browser.close();

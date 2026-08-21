@@ -169,14 +169,18 @@ so it works from a project subpath like `https://<user>.github.io/LYNXXM30/`.
 The verification suite runs the whole game from exactly that kind of subpath so
 an absolute path can't creep back in unnoticed.
 
-`.github/workflows/pages.yml` is already here. **One manual step is required**,
-and nothing can do it for you:
+`.github/workflows/pages.yml` is already here, and it switches Pages on by
+itself: `actions/configure-pages` is given `enablement: true`, which creates the
+Pages site and sets its source to GitHub Actions using the run's own
+`pages: write` permission. No repository setting has to be changed by hand.
 
-> Repository **Settings → Pages → Build and deployment → Source: GitHub Actions**
-
-Until that's set, the workflow runs and fails at the deploy step with an error
-saying Pages isn't enabled. Once it's set, every push to `main` or to the
-feature branch publishes, and you can also run it by hand from the Actions tab.
+**Deployments must come from the default branch.** When Pages is enabled,
+GitHub creates a `github-pages` environment whose deployment-branch rule
+permits only the default branch. A push to a feature branch will build and
+upload the artifact and then fail at the deploy step with *"Branch is not
+allowed to deploy to github-pages due to environment protection rules"*. Either
+merge to `main`, or widen the rule under **Settings → Environments →
+github-pages → Deployment branches**.
 
 The workflow copies only what the browser loads — `index.html`, `inspect.html`,
 `styles/`, `src/`, `vendor/` — adds a `.nojekyll` marker so Pages doesn't run

@@ -1,0 +1,19 @@
+{
+  "name": "LYNX XM30 — Crew Station Trainer",
+  "short_name": "LYNX XM30",
+  "description": "Drive a route from the gunner's or spotter's seat of an XM30 and work targets that grow from specks to silhouettes as the range closes.",
+  "id": "/LYNXXM30/",
+  "start_url": ".",
+  "scope": ".",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "orientation": "landscape",
+  "background_color": "#05070a",
+  "theme_color": "#05070a",
+  "categories": ["games", "simulation"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

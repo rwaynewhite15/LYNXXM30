@@ -9,7 +9,9 @@
 <meta name="theme-color" content="#05070a" />
 <title>LYNX XM30</title>
 <link rel="stylesheet" href="styles/hud.css" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#127950;</text></svg>" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
 <script type="importmap">
 {
   "imports": {
@@ -262,6 +264,30 @@
     <div class="boot-actions">
       <button id="start-btn" class="start-btn">START RUN</button>
       <button id="fullscreen-btn" class="ghost-btn" hidden>FULL SCREEN</button>
+      <button id="install-btn" class="ghost-btn" hidden>INSTALL</button>
+    </div>
+
+    <div class="touch-settings" id="touch-settings" hidden>
+      <h2>Handling</h2>
+      <div class="setting-row">
+        <label for="set-hand">Controls</label>
+        <div class="segmented" id="set-hand" role="group" aria-label="Handedness">
+          <button data-hand="right" class="selected">RIGHT&nbsp;HANDED</button>
+          <button data-hand="left">LEFT&nbsp;HANDED</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <label for="set-sens">Look speed</label>
+        <input id="set-sens" type="range" min="40" max="220" step="5" value="100" />
+        <b id="set-sens-value">1.00&times;</b>
+      </div>
+      <div class="setting-row">
+        <label for="set-haptics">Vibration</label>
+        <div class="segmented" id="set-haptics" role="group" aria-label="Haptics">
+          <button data-haptics="on" class="selected">ON</button>
+          <button data-haptics="off">OFF</button>
+        </div>
+      </div>
     </div>
 
     <div class="touch-help" id="touch-help" hidden>
@@ -288,8 +314,10 @@
       <rect x="34" y="12" width="28" height="20" rx="3" />
       <path d="M30 34 q4 6 10 6" />
     </svg>
-    <h2>ROTATE TO LANDSCAPE</h2>
-    <p>The sight picture needs the width.</p>
+    <h2>BETTER IN LANDSCAPE</h2>
+    <p>The sight picture wants the width, and the controls sit under your
+       thumbs. Portrait works — it just gives you less to see.</p>
+    <button id="portrait-ok" class="start-btn">PLAY IN PORTRAIT</button>
   </div>
 </div>
 

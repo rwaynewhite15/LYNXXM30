@@ -47,12 +47,20 @@ let html = await readFile(join(ROOT, 'index.html'), 'utf8');
 const inline = (v) => () => v;
 
 html = html
+  // The single file has no sibling manifest, icons or service worker to fetch,
+  // and requesting them would only produce console errors in an embed.
+  .replace(/<link rel="manifest"[^>]*>\s*/, inline(''))
+  .replace(/<link rel="icon"[^>]*>\s*/, inline(''))
+  .replace(/<link rel="apple-touch-icon"[^>]*>\s*/, inline(''))
   .replace('<link rel="stylesheet" href="styles/hud.css" />', inline(`<style>\n${css}\n</style>`))
   .replace(/<script type="importmap">[\s\S]*?<\/script>\s*/, inline(''))
   .replace(
     '<script type="module" src="./src/main.js"></script>',
     // A literal `</script>` inside the bundle would close the tag early.
-    inline(`<script type="module">\n${js.replace(/<\/script>/gi, () => '<\\/script>')}\n</script>`),
+    inline(
+      '<script>window.__SINGLE_FILE__ = true;<\/script>\n'
+      + `<script type="module">\n${js.replace(/<\/script>/gi, () => '<\\/script>')}\n</script>`,
+    ),
   );
 
 if (html.includes('src="./src/main.js"') || html.includes('importmap')) {

@@ -110,6 +110,29 @@ if (mode === 'mobile') {
 
   await mp.setViewportSize({ width: h, height: w });
   await mp.waitForTimeout(400);
+  await mp.screenshot({ path: join(OUT, 'mobile-portrait-hint.png'), animations: 'disabled', timeout: 90000 });
+  console.log('shot mobile-portrait-hint.png');
+
+  // Dismiss the recommendation and show portrait actually being played.
+  await mp.evaluate(() => {
+    const g = window.__game;
+    document.getElementById('portrait-ok')?.click();
+    g.simulate(12);
+    const t = g.enemies.enemies.find((e) => {
+      const c = g.perception.contacts.get(e.id);
+      return e.alive && c && c.hasLos && e.basePosition.z > g.driving.position.z + 60;
+    });
+    if (t) {
+      g.views.setMagnification(1);
+      for (let i = 0; i < 40; i++) { g.views.aimAt(t.centre, true); g.step(0.05); }
+      g.gunnery.lrfCooldown = 0;
+      g.gunnery.lase();
+      g.views.aimAt(t.centre, true);
+      g.step(0.05);
+    }
+    for (let i = 0; i < 20; i++) g.hud.update(0.05, g);
+  }).catch(() => {});
+  await mp.waitForTimeout(500);
   await mp.screenshot({ path: join(OUT, 'mobile-portrait.png'), animations: 'disabled', timeout: 90000 });
   console.log('shot mobile-portrait.png');
   await phone.close();

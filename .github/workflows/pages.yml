@@ -38,12 +38,18 @@ jobs:
           mkdir -p _site
           # Only the files the browser actually loads. tools/ needs Node and
           # Playwright and has no business being served.
-          cp index.html inspect.html _site/
-          cp -r styles src vendor _site/
+          cp index.html inspect.html manifest.webmanifest sw.js _site/
+          cp -r styles src vendor icons _site/
           # Without this, Pages runs the tree through Jekyll, which ignores
           # anything beginning with an underscore.
           touch _site/.nojekyll
           echo "Site contents:" && find _site -maxdepth 2 -type d | sort
+
+      - name: Check the service worker's precache list is current
+        run: |
+          # The list is generated from the tree; if it has drifted, an offline
+          # copy would be missing files that shipped. --check writes nothing.
+          node tools/precache.mjs --check
 
       - name: Check the site is self-contained
         run: |
@@ -55,6 +61,10 @@ jobs:
           fi
           test -f _site/vendor/three/three.module.min.js
           test -f _site/src/main.js
+          # The offline layer is useless if half of it is missing from the deploy.
+          test -f _site/sw.js
+          test -f _site/manifest.webmanifest
+          test -f _site/icons/icon-512.png
 
       - uses: actions/configure-pages@v5
         with:

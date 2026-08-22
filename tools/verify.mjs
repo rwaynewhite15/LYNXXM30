@@ -57,6 +57,35 @@ function check(name, ok, detail = '') {
   console.log(`  [${mark}] ${name}${detail ? '  — ' + detail : ''}`);
 }
 
+/* ------------------------------------------------------------ offline shell */
+console.log('OFFLINE SHELL');
+{
+  // The precache list is generated from the tree; if it has drifted, an
+  // installed copy is missing files that shipped. --check writes nothing, so
+  // this cannot quietly repair what it is meant to catch.
+  const { execFileSync } = await import('node:child_process');
+  let precacheOk = true;
+  let precacheDetail = '';
+  try {
+    precacheDetail = execFileSync(
+      process.execPath, [join(ROOT, 'tools/precache.mjs'), '--check'],
+      { cwd: ROOT, encoding: 'utf8' },
+    ).trim();
+  } catch (e) {
+    precacheOk = false;
+    precacheDetail = String(e.stderr || e.message).trim().split('\n')[0];
+  }
+  check('the service worker precache list is current', precacheOk, precacheDetail);
+
+  const manifest = JSON.parse(await readFile(join(ROOT, 'manifest.webmanifest'), 'utf8'));
+  check('the web manifest declares a maskable icon',
+    manifest.icons?.some((i) => i.purpose === 'maskable'),
+    manifest.icons?.map((i) => i.sizes).join(', '));
+  check('the manifest uses relative start_url and scope',
+    !String(manifest.start_url).startsWith('/') && !String(manifest.scope).startsWith('/'),
+    `start_url ${manifest.start_url}, scope ${manifest.scope}`);
+}
+
 /* ---------------------------------------------------------------- inspector */
 console.log('\nMODEL');
 await page.goto(base + '/inspect.html', { waitUntil: 'load' });
@@ -610,10 +639,181 @@ await mp.waitForTimeout(250);
 const portrait = await mp.evaluate(() => ({
   rotateShown: !document.getElementById('rotate').hidden,
   state: window.__game.state,
+  bodyPortrait: document.body.classList.contains('portrait'),
 }));
-check('portrait raises the rotate prompt and pauses',
+check('portrait offers the landscape recommendation once',
   portrait.rotateShown && portrait.state === 'paused',
   `${portrait.state}, prompt ${portrait.rotateShown ? 'shown' : 'hidden'}`);
+check('portrait switches to the stacked layout', portrait.bodyPortrait);
+
+// Dismissing the recommendation must actually leave you playing.
+const portraitPlay = await mp.evaluate(() => {
+  const g = window.__game;
+  document.getElementById('portrait-ok').click();
+  g.simulate(2);
+  const controls = [...document.querySelectorAll('.tbtn')];
+  return {
+    state: g.state,
+    hintHidden: document.getElementById('rotate').hidden,
+    onScreen: controls.every((b) => {
+      const r = b.getBoundingClientRect();
+      return r.left >= -1 && r.top >= -1 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1;
+    }),
+    steerFullWidth: document.getElementById('touch-steer').getBoundingClientRect().width > innerWidth * 0.8,
+  };
+});
+check('portrait is playable once the recommendation is dismissed',
+  portraitPlay.state === 'running' && portraitPlay.hintHidden, portraitPlay.state);
+check('no control is off screen in portrait at 390x844', portraitPlay.onScreen);
+check('the steer pad spans the width in portrait', portraitPlay.steerFullWidth);
+
+// A long designation must not push a contact row out of its panel. Work
+// targets up the ladder first, or this measures an empty list and proves
+// nothing.
+const overflow = await mp.evaluate(() => {
+  const g = window.__game;
+  for (let pass = 0; pass < 40; pass++) {
+    const target = g.enemies.enemies.find((e) => {
+      const c = g.perception.contacts.get(e.id);
+      return e.alive && c && c.hasLos;
+    });
+    if (target) {
+      g.views.setMagnification(2);
+      for (let i = 0; i < 12; i++) { g.views.aimAt(target.centre, true); g.step(0.05); }
+    } else {
+      g.simulate(1);
+    }
+    g.hud.update(0.05, g);
+    const visible = [...document.querySelectorAll('#contact-list li')]
+      .filter((li) => li.style.display !== 'none');
+    if (visible.length >= 2) break;
+  }
+  g.hud.update(0.05, g);
+
+  const panel = document.getElementById('contacts-panel').getBoundingClientRect();
+  const rows = [...document.querySelectorAll('#contact-list li')]
+    .filter((li) => li.style.display !== 'none');
+  return {
+    rows: rows.length,
+    labels: rows.map((li) => li.querySelector('.who').textContent.trim()).slice(0, 3),
+    spilled: rows.filter((li) => li.getBoundingClientRect().right > panel.right + 1).length,
+    tallest: Math.max(0, ...rows.map((li) => Math.round(li.getBoundingClientRect().height))),
+  };
+});
+check('contact rows are actually present to measure', overflow.rows >= 1,
+  `${overflow.rows} rows: ${overflow.labels.join(', ')}`);
+check('contact rows stay inside the panel in portrait',
+  overflow.rows >= 1 && overflow.spilled === 0,
+  `${overflow.spilled} spilled, tallest row ${overflow.tallest} px`);
+
+/* --------------------------- installable & offline ------------------------ */
+console.log('\nINSTALL / OFFLINE');
+
+const pwa = await mp.evaluate(async () => {
+  const link = document.querySelector('link[rel="manifest"]');
+  let manifest = null;
+  try { manifest = await (await fetch(link.href)).json(); } catch { /* ignore */ }
+
+  // Give the worker a moment to install and take control.
+  let reg = null;
+  try { reg = await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise((r) => setTimeout(() => r(null), 15000)),
+  ]); } catch { /* ignore */ }
+
+  const cacheNames = await caches.keys();
+  let cached = 0;
+  if (cacheNames.length) {
+    const c = await caches.open(cacheNames[0]);
+    cached = (await c.keys()).length;
+  }
+
+  return {
+    manifestLinked: !!link,
+    manifestName: manifest?.short_name,
+    orientation: manifest?.orientation,
+    display: manifest?.display,
+    registered: !!reg,
+    scope: reg?.scope,
+    controlled: !!navigator.serviceWorker.controller,
+    cacheNames,
+    cached,
+  };
+});
+
+check('the manifest is linked and served', pwa.manifestLinked && !!pwa.manifestName, pwa.manifestName);
+check('the manifest asks for a fullscreen landscape game',
+  pwa.display === 'fullscreen' && pwa.orientation === 'landscape',
+  `${pwa.display}, ${pwa.orientation}`);
+check('the service worker registers under the page scope',
+  pwa.registered && pwa.scope?.endsWith('/LYNXXM30/'), pwa.scope || 'not registered');
+check('the whole shell is precached', pwa.cached >= 35,
+  `${pwa.cached} entries in ${pwa.cacheNames[0] || '(no cache)'}`);
+
+// The real test of an offline claim: pull the network and reload.
+await phone.setOffline(true);
+let offlineOk = false;
+let offlineDetail = '';
+try {
+  await mp.reload({ waitUntil: 'load', timeout: 60000 });
+  await mp.waitForFunction('window.__ready === true', { timeout: 40000 });
+  const info = await mp.evaluate(() => ({
+    ready: window.__ready === true,
+    hasThree: typeof window.__game?.graphics?.gpu?.api === 'string',
+  }));
+  offlineOk = info.ready && info.hasThree;
+  offlineDetail = 'booted from cache with no network';
+} catch (e) {
+  offlineDetail = e.message.split('\n')[0];
+}
+await phone.setOffline(false);
+check('the game boots with the network switched off', offlineOk, offlineDetail);
+
+/* ------------------------------ touch ergonomics -------------------------- */
+console.log('\nTOUCH ERGONOMICS');
+
+// Back to landscape: in portrait the controls are full-width bands, so
+// handedness reverses the order within a row rather than swapping columns.
+// The column swap is the landscape behaviour, so test it there.
+await mp.setViewportSize({ width: 844, height: 390 });
+await mp.waitForTimeout(300);
+
+const ergo = await mp.evaluate(() => {
+  const rightOf = (sel) => document.querySelector(sel).getBoundingClientRect().left;
+  const fire = '[data-hold="fire"]';
+  const steer = '#touch-steer';
+
+  const rightHanded = { fire: rightOf(fire), steer: rightOf(steer) };
+
+  document.querySelector('#set-hand button[data-hand="left"]').click();
+  const leftHanded = { fire: rightOf(fire), steer: rightOf(steer) };
+
+  const sens = document.getElementById('set-sens');
+  sens.value = '200';
+  sens.dispatchEvent(new Event('input', { bubbles: true }));
+  const gain200 = window.__gameConfigLookGain();
+  sens.value = '50';
+  sens.dispatchEvent(new Event('input', { bubbles: true }));
+  const gain50 = window.__gameConfigLookGain();
+
+  // Put it back and confirm the choice survived into storage.
+  document.querySelector('#set-hand button[data-hand="right"]').click();
+  sens.value = '100';
+  sens.dispatchEvent(new Event('input', { bubbles: true }));
+  let stored = null;
+  try { stored = JSON.parse(localStorage.getItem('xm30.settings')); } catch { /* ignore */ }
+
+  return { rightHanded, leftHanded, gain200, gain50, stored };
+});
+
+check('left-handed mode swaps the control columns',
+  ergo.leftHanded.fire < ergo.rightHanded.fire && ergo.leftHanded.steer > ergo.rightHanded.steer,
+  `FIRE ${Math.round(ergo.rightHanded.fire)} → ${Math.round(ergo.leftHanded.fire)} px`);
+check('look sensitivity scales the touch gain',
+  ergo.gain200 > ergo.gain50 * 3.5,
+  `${ergo.gain50.toFixed(2)} at 0.5× → ${ergo.gain200.toFixed(2)} at 2×`);
+check('settings persist to storage',
+  ergo.stored && ergo.stored.handedness === 'right', JSON.stringify(ergo.stored));
 
 check('no page errors on mobile', mobileErrors.length === 0, mobileErrors.slice(0, 2).join(' | '));
 await phone.close();

@@ -127,9 +127,22 @@ first, and taking it at range.
 
 ## Playing on a phone
 
-Hold the device in **landscape** — the game asks you to turn it if you don't,
-because a portrait sight picture is a slit. Touch controls appear automatically
-on any device with a touchscreen.
+The phone is the primary target, not an afterthought. Touch controls appear
+automatically on any device with a touchscreen, the game installs to the home
+screen, and it runs with no network at all.
+
+**Install it.** On Android, the title card shows an **INSTALL** button; on iOS,
+use Share → Add to Home Screen. Installed, it launches fullscreen in landscape
+with no browser chrome. A service worker precaches the entire shell — three.js
+is vendored and every texture is generated at runtime, so there is nothing left
+to fetch — which means it works on a plane, on the Underground, or with the
+radio off. The verification suite proves this by switching the browser offline
+and reloading.
+
+**Landscape is better, portrait works.** Turn the phone sideways and you get
+the full sight picture with controls under your thumbs. Upright, the controls
+become full-width bands below the view and the panels split into two columns —
+less to see, still playable. You get told this once, and then never again.
 
 | Control | Action |
 | --- | --- |
@@ -145,20 +158,37 @@ Aiming and firing are deliberately on separate controls. A tap-to-fire scheme
 reads well in a screenshot but makes it impossible to track a target and shoot
 it at the same moment, which is most of this game.
 
+### Handling
+
+The title card carries three settings on a touch device, all remembered:
+
+- **Controls: right / left handed.** Mirrors the whole scheme. Which hand holds
+  a phone is not a preference the way a colour scheme is — reaching across the
+  screen for FIRE means holding the device wrong for an entire run.
+- **Look speed.** 0.4× to 2.2× on the drag-to-slew gain.
+- **Vibration.** Short haptics on firing, on taking a hit, and on a kill.
+
+### What it does with the handset
+
+- **Keeps the screen awake** while a run is in progress, and gives the lock back
+  the moment you pause.
+- **Stands down when you put it away.** Backgrounding the app, taking a call, or
+  the screen locking pauses the run rather than letting the vehicle drive itself
+  into a wall.
+- **Asks for landscape** when you go fullscreen, where the browser permits it.
+
+None of these APIs exist everywhere — iPhone Safari has no Fullscreen API and no
+orientation lock — so each is optional and failing is silent.
+
 The HUD switches to a compact layout below roughly 560 px of height: the panels
 stack into two columns clear of your thumbs, the optic surround becomes an
 ellipse rather than a circle so a 2.2:1 phone screen isn't half black, and the
 turret repeater and hint bar drop out. Every touch target clears 44 px, and the
 whole HUD is inset from the notch and home indicator via `env(safe-area-inset-*)`.
 
-Phones default to the **LOW** graphics preset — press **ZOOM**'s neighbour, or
-`Q` on a keyboard, to raise it. The adaptive scaler will pull resolution back
-if frames run long, so a slower device degrades gracefully rather than
-stuttering.
-
-If your browser supports it, **FULL SCREEN** on the title card hides the
-browser chrome; iPhone Safari has no Fullscreen API at all, so the button hides
-itself there. Adding the page to your home screen gets you the same result.
+Phones default to the **LOW** graphics preset — `Q` on a keyboard raises it, or
+cycle it from the pause screen. The adaptive scaler pulls resolution back if
+frames run long, so a slower device degrades gracefully rather than stuttering.
 
 ---
 
@@ -182,10 +212,11 @@ allowed to deploy to github-pages due to environment protection rules"*. Either
 merge to `main`, or widen the rule under **Settings → Environments →
 github-pages → Deployment branches**.
 
-The workflow copies only what the browser loads — `index.html`, `inspect.html`,
-`styles/`, `src/`, `vendor/` — adds a `.nojekyll` marker so Pages doesn't run
-the tree through Jekyll, and fails the build if it finds a root-absolute `src`
-or `href` in either entry point.
+The workflow copies only what the browser loads — the two entry points,
+`styles/`, `src/`, `vendor/`, `icons/`, the manifest and the service worker —
+adds a `.nojekyll` marker so Pages doesn't run the tree through Jekyll, checks
+the precache list hasn't drifted, and fails the build if it finds a
+root-absolute `src` or `href` in either entry point.
 
 If you'd rather not use Actions, the `gh-pages`-branch route works too: the
 repository root is already a valid site, so pointing Pages at a branch and the
@@ -290,11 +321,18 @@ src/
     audio.js          synthesised — no sample files
     graphics.js       quality presets, adaptive resolution, GPU readout
     touch.js          touch controls, feeding the same input state as a mouse
+    settings.js       persisted handedness, sensitivity, haptics
+    mobile.js         wake lock, background pause, orientation lock
+sw.js                 service worker — precaches the whole shell for offline
+manifest.webmanifest  install metadata
+icons/                generated app icons
 tools/
   verify.mjs          end-to-end checks in a real browser
   shoot.mjs           headless screenshots of the model and the game
   bundle.mjs          single-file build
   balance.mjs         unattended survivability probe
+  icons.mjs           regenerates the app icons from SVG artwork
+  precache.mjs        regenerates the service worker's asset list
 .github/workflows/
   pages.yml           static deploy to GitHub Pages
 vendor/three/         three.js r185, MIT
@@ -303,13 +341,15 @@ vendor/three/         three.js r185, MIT
 ## Development
 
 ```
-node tools/verify.mjs            # 64 end-to-end checks, exits non-zero on failure
+node tools/verify.mjs            # 81 end-to-end checks, exits non-zero on failure
 node tools/shoot.mjs inspect     # renders the model from six angles into .shots/
 node tools/shoot.mjs game 40     # boots the game, simulates 40 s, screenshots it
 node tools/bundle.mjs            # writes dist/lynx-xm30.html, one self-contained file
 node tools/shoot.mjs bundle      # smoke-tests that build: must boot with zero sub-requests
 node tools/balance.mjs           # how far each difficulty gets with no player input
-node tools/shoot.mjs mobile      # renders the phone layout at 844x390, landscape and portrait
+node tools/shoot.mjs mobile      # renders the phone layout, landscape and portrait
+node tools/precache.mjs          # after changing any file the browser loads
+node tools/precache.mjs --check  # fails if the precache list has drifted
 ```
 
 `tools/shoot.mjs` and `tools/verify.mjs` drive a real browser through
@@ -321,7 +361,13 @@ input included — without rendering.
 
 The mobile checks run in a second browser context with `hasTouch` and no mouse,
 and drive the real pointer handlers with synthesised touch events rather than
-calling internals.
+calling internals. The offline claim is tested by switching that context
+offline and reloading — if the shell were incomplete, the reload would fail.
+
+**After changing any file the browser loads, run `node tools/precache.mjs`.**
+The service worker's asset list and cache name are generated from the tree; the
+suite and the deploy workflow both fail if it has drifted, because an installed
+copy would otherwise be missing files that shipped.
 
 ## Licence
 

@@ -23,6 +23,8 @@ import { Audio } from './game/audio.js';
 import { Hud } from './game/hud.js';
 import { Graphics } from './game/graphics.js';
 import { TouchControls } from './game/touch.js';
+import { Settings, Haptics } from './game/settings.js';
+import { MobileRuntime } from './game/mobile.js';
 
 const canvas = document.getElementById('viewport');
 const bootOverlay = document.getElementById('boot');
@@ -37,6 +39,16 @@ const rotateOverlay = document.getElementById('rotate');
  * without them.
  */
 const IS_TOUCH = TouchControls.available();
+
+/** Base look gain; the sensitivity setting scales this. */
+const BASE_LOOK_GAIN = CONFIG.touch.lookGain;
+
+function applySettings() {
+  CONFIG.touch.lookGain = BASE_LOOK_GAIN * Settings.get('lookSensitivity');
+  document.body.classList.toggle('left-handed', Settings.get('handedness') === 'left');
+}
+Settings.onChange(applySettings);
+applySettings();
 /** A touchscreen laptop still has a mouse; a phone does not. */
 const HAS_MOUSE = matchMedia('(any-pointer: fine)').matches;
 
@@ -114,6 +126,9 @@ class Game {
     this.input = new Input(canvas);
 
     // Touch drives the same latched input state the keyboard and mouse do.
+    this.mobile = new MobileRuntime(this);
+    try { this._portraitHintSeen = sessionStorage.getItem('xm30.portraitHint') === '1'; }
+    catch { this._portraitHintSeen = false; }
     this.touch = new TouchControls(canvas, this.input);
     this.touch.setEnabled(IS_TOUCH);
     this.touch.setSeat(this.seatChoice);
@@ -191,6 +206,7 @@ class Game {
         const t = driving.takeHit(round.threatKey || 'smallArms');
         hud.flashHit();
         audio.clang();
+        Haptics.hit();
         this.score.hitsTaken++;
         this.addScore(CONFIG.scoring.hitTaken);
         if (driving.destroyed) this.finish('DESTROYED');
@@ -264,11 +280,15 @@ class Game {
       if (c && c.level >= LEVEL.IDENTIFY) { points += CONFIG.scoring.identifyBonus; this.score.identified++; }
       points += Math.round(range / 100) * CONFIG.scoring.rangeBonusPerHundred;
       this.addScore(points);
+      Haptics.kill();
       hud.say(`TARGET DOWN — ${enemy.type.name} at ${Math.round(range)} m  +${points}`, 'good');
       this.effects.explodeAt(enemy.centre, 0.4);
     };
 
-    this.gunnery.onRoundSpent = () => { this.score.roundsFired++; };
+    this.gunnery.onRoundSpent = (kind) => {
+      this.score.roundsFired++;
+      if (kind === 'coax') Haptics.coax(); else Haptics.fire();
+    };
   }
 
   addScore(n) { this.score.total = Math.max(0, this.score.total + n); }
@@ -280,6 +300,7 @@ class Game {
     this.input.requestLock();
     this.audio.start();
     this.audio.resume();
+    this.mobile.requestWakeLock();
     this.hud.show();
     this.hud.say(CONFIG.route.briefingHint);
     this.hud.say(`SEAT: ${this.views.seatDef.label} — ${this.diff.label}`);
@@ -291,6 +312,7 @@ class Game {
     this.state = 'paused';
     pauseOverlay.hidden = false;
     this.audio.suspend();
+    this.mobile.releaseWakeLock();
     // A finger lifted off the screen during a pause never sends its pointerup,
     // so drop anything still held or the gun keeps firing on resume.
     this.touch.releaseHeld();
@@ -302,6 +324,7 @@ class Game {
     this.state = 'running';
     pauseOverlay.hidden = true;
     this.audio.resume();
+    this.mobile.requestWakeLock();
     this.input.requestLock();
     this._last = performance.now();
   }
@@ -314,6 +337,7 @@ class Game {
     this.touch.releaseHeld();
     this.touch.setEnabled(false);
     this.audio.suspend();
+    this.mobile.releaseWakeLock();
 
     const s = this.score;
     const accuracy = s.roundsFired ? Math.round((s.roundsHit / s.roundsFired) * 100) : 0;
@@ -448,15 +472,33 @@ class Game {
   }
 
   /**
-   * A phone held upright has no room for a sight picture, so the run is held
-   * until it is turned. Only ever shown on a touch device — a narrow desktop
-   * window is portrait too, and nobody is going to rotate their monitor.
+   * Portrait is playable — the controls become full-width bands under the view
+   * — but landscape is better, so the first time a run goes upright we say so
+   * once and then never again. Only on a touch device: a narrow desktop window
+   * is portrait too, and nobody is going to rotate their monitor.
    */
   _checkOrientation() {
-    const portrait = IS_TOUCH && innerHeight > innerWidth * 1.05;
-    if (rotateOverlay.hidden === !portrait) return;
-    rotateOverlay.hidden = !portrait;
-    if (portrait && this.state === 'running') this.pause();
+    const portrait = innerHeight > innerWidth * 1.05;
+    document.body.classList.toggle('portrait', portrait && IS_TOUCH);
+
+    const shouldHint = portrait && IS_TOUCH && !this._portraitHintSeen && this.state !== 'boot';
+    if (shouldHint && rotateOverlay.hidden) {
+      rotateOverlay.hidden = false;
+      if (this.state === 'running') this.pause(true);
+      // The hint is the pause screen while it is up; two stacked overlays
+      // saying different things is just noise.
+      pauseOverlay.hidden = true;
+    } else if (!portrait && !rotateOverlay.hidden) {
+      rotateOverlay.hidden = true;
+      if (this.state === 'paused') this.resume();
+    }
+  }
+
+  dismissPortraitHint() {
+    this._portraitHintSeen = true;
+    try { sessionStorage.setItem('xm30.portraitHint', '1'); } catch { /* ignore */ }
+    rotateOverlay.hidden = true;
+    if (this.state === 'paused') this.resume();
   }
 
   /**
@@ -478,6 +520,7 @@ class Game {
       this.hud.flashHit();
       this.hud.say(`STRUCK ${c.hazard.name.toUpperCase()} — mobility damage`, 'bad');
       this.audio.impact();
+      Haptics.strike();
       if (this.driving.destroyed) this.finish('IMMOBILISED');
     }
 
@@ -672,6 +715,7 @@ document.getElementById('start-btn').addEventListener('click', () => {
 });
 
 document.getElementById('restart-btn').addEventListener('click', () => location.reload());
+document.getElementById('portrait-ok')?.addEventListener('click', () => game.dismissPortraitHint());
 
 canvas.addEventListener('click', () => {
   if (game.state === 'paused' && pauseOverlay.hidden === false) game.resume();
@@ -691,13 +735,94 @@ if (IS_TOUCH) {
   if (help) help.hidden = false;
 }
 
+/* ---------------------------- install & offline --------------------------- */
+
+// The single-file build has no sibling files to cache and no manifest.
+if (!window.__SINGLE_FILE__ && 'serviceWorker' in navigator) {
+  addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {
+      // Blocked, unsupported, or served from file:// — the game runs either
+      // way, it just will not be available offline.
+    });
+  });
+}
+
+// Chrome and friends fire this instead of showing their own install UI; hold
+// it and surface an INSTALL button on the title card.
+const installBtn = document.getElementById('install-btn');
+let installPrompt = null;
+addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (installBtn) installBtn.hidden = false;
+});
+installBtn?.addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installBtn.hidden = true;
+  try {
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+  } catch { /* dismissed */ }
+  installPrompt = null;
+});
+addEventListener('appinstalled', () => { if (installBtn) installBtn.hidden = true; });
+
+/* ----------------------------- touch settings ----------------------------- */
+
+if (IS_TOUCH) {
+  const panel = document.getElementById('touch-settings');
+  if (panel) panel.hidden = false;
+
+  const handGroup = document.getElementById('set-hand');
+  for (const btn of handGroup?.querySelectorAll('button') ?? []) {
+    btn.classList.toggle('selected', btn.dataset.hand === Settings.get('handedness'));
+    btn.addEventListener('click', () => {
+      Settings.set('handedness', btn.dataset.hand);
+      for (const b of handGroup.querySelectorAll('button')) {
+        b.classList.toggle('selected', b === btn);
+      }
+    });
+  }
+
+  const sens = document.getElementById('set-sens');
+  const sensValue = document.getElementById('set-sens-value');
+  if (sens) {
+    sens.value = String(Math.round(Settings.get('lookSensitivity') * 100));
+    const show = () => {
+      const v = Number(sens.value) / 100;
+      if (sensValue) sensValue.textContent = `${v.toFixed(2)}×`;
+      return v;
+    };
+    show();
+    sens.addEventListener('input', () => Settings.set('lookSensitivity', show()));
+  }
+
+  const hapGroup = document.getElementById('set-haptics');
+  for (const btn of hapGroup?.querySelectorAll('button') ?? []) {
+    const on = btn.dataset.haptics === 'on';
+    btn.classList.toggle('selected', on === Settings.get('haptics'));
+    btn.addEventListener('click', () => {
+      Settings.set('haptics', on);
+      for (const b of hapGroup.querySelectorAll('button')) {
+        b.classList.toggle('selected', b === btn);
+      }
+      if (on) Haptics.fire();
+    });
+  }
+}
+
 const fsBtn = document.getElementById('fullscreen-btn');
 if (fsBtn && document.documentElement.requestFullscreen) {
   fsBtn.hidden = false;
   fsBtn.addEventListener('click', async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+      else {
+        await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+        // Only a fullscreen document may lock orientation, and not every
+        // browser allows even that.
+        await game.mobile.lockLandscape();
+      }
     } catch {
       // Blocked by the embedding page or unsupported (iPhone Safari has no
       // Fullscreen API at all). Nothing to recover — the game still runs.
@@ -729,4 +854,7 @@ game.resize();
 requestAnimationFrame(tick);
 
 window.__game = game;
+// Exposed for the test harness: the live look gain after the sensitivity
+// setting has been applied.
+window.__gameConfigLookGain = () => CONFIG.touch.lookGain;
 window.__ready = true;

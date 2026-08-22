@@ -345,7 +345,14 @@ body.playing { cursor: none; }
   width: 8px; height: 8px;
   border: 1px solid currentColor;
 }
-.contact-list .who { overflow: hidden; text-overflow: ellipsis; }
+.contact-list .who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Without this a long designation wraps and pushes the row out of the
+     panel, which is very visible in the narrow portrait column. */
+  white-space: nowrap;
+  min-width: 0;
+}
 .contact-list .rng { opacity: .8; font-variant-numeric: tabular-nums; }
 .contact-list li.detect    { color: var(--cyan); }
 .contact-list li.recognize { color: var(--amber); }
@@ -645,6 +652,81 @@ body.playing { cursor: none; }
 .tbtn.fire.pressed { background: rgba(255, 90, 74, .55); }
 .tbtn:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
+/* ------------------------------- handedness ------------------------------ */
+/*
+   Mirror the whole control scheme. Which hand holds a phone is not a
+   preference the way a colour scheme is — a left-handed player reaching across
+   the screen for FIRE is holding the device wrong for the entire run.
+*/
+body.left-handed .touch-left {
+  left: auto;
+  right: var(--pad-r);
+  align-items: flex-end;
+}
+body.left-handed .touch-right {
+  right: auto;
+  left: var(--pad-l);
+  align-items: flex-start;
+}
+/* Keep FIRE on the outboard edge, where the thumb naturally rests. */
+body.left-handed .touch-actions,
+body.left-handed .touch-modes,
+body.left-handed .touch-speed { flex-direction: row-reverse; }
+
+/* ============================= PORTRAIT LAYOUT =========================== */
+/*
+   Landscape is the better orientation for a sight picture and the manifest
+   asks for it, but refusing to run in portrait is not mobile-first — a phone
+   comes out of a pocket upright. In portrait the controls become full-width
+   bands under the view and the panels split into two columns.
+*/
+
+body.portrait .touch-left,
+body.portrait .touch-right {
+  left: var(--pad-l);
+  right: var(--pad-r);
+  align-items: center;
+}
+body.portrait .touch-left { bottom: var(--pad-b); }
+body.portrait .touch-right { bottom: calc(var(--pad-b) + 128px); }
+body.portrait .touch-steer { width: 100%; }
+body.portrait .touch-speed,
+body.portrait .touch-modes,
+body.portrait .touch-actions { width: 100%; justify-content: center; }
+body.portrait .tbtn { flex: 1 1 0; min-width: 0; }
+body.portrait .tbtn.fire { flex: 0 0 auto; min-width: 84px; height: 84px; }
+
+body.portrait .status,
+body.portrait .ranging {
+  top: calc(var(--pad-t) + 44px);
+  bottom: auto;
+  width: calc(50% - var(--pad-l) - 5px);
+}
+body.portrait .status { left: var(--pad-l); right: auto; }
+body.portrait .ranging { right: var(--pad-r); left: auto; }
+body.portrait .contacts {
+  top: calc(var(--pad-t) + 156px);
+  right: var(--pad-r);
+  left: auto;
+  width: calc(50% - var(--pad-r) - 5px);
+  max-height: 24vh;
+}
+body.portrait .azimuth { max-width: 46vw; height: 18px; }
+body.portrait .az-tape .lbl { font-size: 7.5px; top: 9px; }
+body.portrait .seat-sub { font-size: 8px; }
+body.portrait .ticker { bottom: 264px; width: 84vw; }
+
+/* Upright, the sight picture is taller than it is wide; the surround follows. */
+body.portrait .optic-mask {
+  background: radial-gradient(
+      ellipse at 50% 42%,
+      rgba(0,0,0,0)    0%,
+      rgba(0,0,0,0)    56%,
+      rgba(0,0,0,.45)  76%,
+      rgba(0,0,0,.9)   94%,
+      #000             100%);
+}
+
 /* ============================ COMPACT HUD LAYOUT ========================= */
 /*
    Applied by the game when the viewport is small — a phone in landscape has
@@ -726,8 +808,11 @@ body.touch.playing { cursor: auto; }
 
 /* =============================== ORIENTATION ============================= */
 
-.rotate { z-index: 60; }
-.rotate-card { text-align: center; padding: 24px; }
+/* An ID selector so this beats `.overlay`'s z-index regardless of where the
+   two rules land in source order — otherwise the pause card, which comes later
+   in the document, paints over the hint. */
+#rotate.overlay { z-index: 60; background: rgba(3, 7, 5, .92); }
+.rotate-card { text-align: center; padding: 24px; max-width: 320px; }
 .rotate-glyph {
   width: 132px;
   height: 92px;
@@ -738,7 +823,8 @@ body.touch.playing { cursor: auto; }
   margin-bottom: 14px;
 }
 .rotate-card h2 { margin: 0 0 8px; letter-spacing: .18em; font-size: 16px; }
-.rotate-card p { margin: 0; opacity: .6; font-size: 12px; }
+.rotate-card p { margin: 0 0 18px; opacity: .6; font-size: 12px; line-height: 1.5; }
+.rotate-card .start-btn { margin-top: 0; width: 100%; padding: 13px 18px; font-size: 12px; }
 
 /* ================================ OVERLAYS =============================== */
 
@@ -860,6 +946,46 @@ kbd {
 }
 .ghost-btn:hover { background: rgba(125, 253, 166, .1); }
 .ghost-btn[hidden] { display: none; }
+
+.touch-settings { margin-top: 18px; }
+.touch-settings[hidden] { display: none; }
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  font-size: 11.5px;
+}
+.setting-row > label { flex: 0 0 82px; opacity: .65; }
+.setting-row > b { flex: 0 0 46px; text-align: right; font-variant-numeric: tabular-nums; }
+.setting-row input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 90px;
+  accent-color: var(--green);
+  height: 28px;
+}
+
+.segmented { display: flex; flex: 1 1 auto; }
+.segmented button {
+  flex: 1 1 0;
+  min-height: 38px;
+  padding: 6px 8px;
+  font-family: var(--font);
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  color: var(--green);
+  background: rgba(125, 253, 166, .05);
+  border: 1px solid var(--panel-line);
+  cursor: pointer;
+}
+.segmented button + button { border-left: 0; }
+.segmented button.selected {
+  background: rgba(125, 253, 166, .2);
+  border-color: var(--green);
+  color: #fff;
+}
+.segmented button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
 .touch-help { margin-top: 20px; }
 .touch-help[hidden] { display: none; }
